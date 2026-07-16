@@ -3,194 +3,1058 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover">
-<title>スターター — 三つの灯</title>
+<title>いつきくんの ぼうけん</title>
 <!--
-  配線確認用スターター。
-  ゲームを作るときはこのファイルを丸ごと置き換える。ただし次の3点は、新しいゲームでも
-  そのまま踏襲すること（harness/driver.js・harness/scenarios/ の見本と対応している）:
-
-  - tapTargets(): タップ判定を持つ「もの」を列挙して返すグローバル関数。
-    ハーネスはこれを読み取り専用で読んで、座標変換・重なりチェック・実タップに使う
-  - S（進行状態・セーブ対象・JSON化可能）/ G（揮発状態・モードのみ）というグローバル変数の分離
-  - 進行フラグは操作の瞬間に確定・即セーブする（タイマーや演出コールバックの中で確定させない）
-
-  この3点さえ守れば、ジャンルは何でもよい。
+  いつきくんの冒険 v0.1 — 朝のルーティン・タップゲーム（仕様: itsuki_bouken_spec_v0_1.md 反証済）
+  感情仕様「考えて、やってみたら、できた」。✗・スコア・タイマーは出さない。
+  テンプレ踏襲: tapTargets() 公開 / S・G 分離 / 進行フラグは接触の瞬間に同期確定（D7）。
+  セーブなし（仕様§7）。テスト注入: ?ts=N（加速）・?v1=A|B・?v2=A|B（バリエーション固定）。
 -->
 <style>
-  html,body{margin:0;height:100%;background:#0e1420;color:#dce6f5;font-family:system-ui,-apple-system,sans-serif;overflow:hidden;-webkit-user-select:none;user-select:none}
+  html,body{margin:0;height:100%;background:#2b2340;color:#fff8ef;font-family:system-ui,-apple-system,sans-serif;overflow:hidden;-webkit-user-select:none;user-select:none;touch-action:manipulation}
   #app{display:flex;flex-direction:column;height:100%}
-  /* 上部バー。canvas とは構造的に分離（重ねない） */
-  #hud{display:flex;align-items:center;gap:10px;padding:6px 10px;background:#141d2e;border-bottom:1px solid #26344d}
-  #title-label{flex:1;font-size:13px;opacity:.9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  #prog{font-size:13px;opacity:.8}
-  .hbtn{background:#1d2a42;color:#dce6f5;border:1px solid #33507a;border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer}
-  /* 遊び場。canvas は #wrap 内にレターボックス配置 */
+  /* 上部バー。canvas とは構造的に分離（重ねない）。高さ固定 */
+  #hud{display:flex;align-items:center;gap:10px;padding:0 12px;background:#3a2f55;border-bottom:1px solid #55467a;height:44px;box-sizing:border-box}
+  #title-label{flex:1;font-size:14px;opacity:.95;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .hbtn{background:#57497d;color:#fff8ef;border:1px solid #7a68a8;border-radius:10px;padding:6px 14px;font-size:14px;cursor:pointer;touch-action:manipulation}
+  .hbtn:active{transform:scale(.96)}
+  #hudConfirm{display:none;align-items:center;gap:10px}
+  #hudConfirm span{font-size:14px}
+  /* 遊び場 */
   #wrap{position:relative;flex:1;min-height:0}
-  #cv{position:absolute;background:#0a0f1a;touch-action:none}
-  /* 下部ドック。canvas とは構造的に分離。高さ固定で内容変化によるレイアウトのガタつきを断つ */
-  #dock{display:flex;justify-content:center;align-items:center;gap:12px;padding:8px;background:#141d2e;border-top:1px solid #26344d;min-height:56px;box-sizing:border-box}
-  #title{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#0e1420;z-index:10;text-align:center;padding:0 24px}
-  #title h1{font-weight:400;letter-spacing:.2em;font-size:22px;margin:0}
-  #title p{opacity:.6;font-size:12px;margin:0;max-width:420px}
-  #title button{min-width:200px;padding:12px;border-radius:12px;border:1px solid #33507a;background:#1d2a42;color:#dce6f5;font-size:15px;cursor:pointer}
+  #cv{position:absolute;background:#fdf3e3;touch-action:none}
+  /* 下部ドック。高さ固定 */
+  #dock{display:flex;justify-content:center;align-items:center;gap:12px;padding:8px;background:#3a2f55;border-top:1px solid #55467a;min-height:56px;box-sizing:border-box}
+  /* タイトル／シーン選択（play モード外のみ表示する全画面 DOM。canvas と共存しない） */
+  .screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;background:linear-gradient(#ffe9b8,#ffd28a);z-index:10;text-align:center;padding:0 24px;color:#6b4a2b}
+  .screen h1{font-weight:700;letter-spacing:.14em;font-size:30px;margin:0;text-shadow:0 2px 0 #fff6}
+  .screen p{opacity:.75;font-size:14px;margin:0}
+  .bigbtn{min-width:210px;padding:16px 20px;border-radius:18px;border:3px solid #e8a94f;background:#fffdf6;color:#6b4a2b;font-size:20px;cursor:pointer;box-shadow:0 4px 0 #d99b3f;touch-action:manipulation}
+  .bigbtn:active{transform:translateY(3px);box-shadow:0 1px 0 #d99b3f}
+  #select{display:none}
+  .scenebtns{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+  .scenebtn{width:230px;height:170px;border-radius:22px;border:3px solid #e8a94f;background:#fffdf6;color:#6b4a2b;font-size:20px;cursor:pointer;box-shadow:0 5px 0 #d99b3f;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;position:relative;touch-action:manipulation}
+  .scenebtn:active{transform:translateY(3px);box-shadow:0 2px 0 #d99b3f}
+  .scenebtn .art{font-size:52px;line-height:1}
+  .scenebtn .flower{position:absolute;top:8px;right:12px;font-size:24px;display:none}
 </style>
 </head>
 <body>
 <div id="app">
   <div id="hud">
-    <span id="title-label">スターター — 三つの灯</span>
-    <span id="prog">灯 0/3</span>
+    <span id="title-label">いつきくんの ぼうけん</span>
+    <button class="hbtn" id="btnBack" style="display:none">もどる</button>
+    <span id="hudConfirm"><span>やめる？</span><button class="hbtn" id="btnYes">うん</button><button class="hbtn" id="btnNo">まだ</button></span>
   </div>
   <div id="wrap">
     <canvas id="cv" width="960" height="540"></canvas>
   </div>
   <div id="dock">
-    <button class="hbtn" id="btnReset">はじめから</button>
+    <button class="hbtn" id="btnSound">♪ おと</button>
   </div>
 </div>
-<div id="title">
-  <h1>スターター — 三つの灯</h1>
-  <p>3つの灯をすべて点けるだけの最小ゲーム。canvas 上の円をタップすると灯る。</p>
-  <button class="hbtn" id="btnStart">はじめる</button>
-  <button class="hbtn" id="btnCont">つづきから</button>
+<div id="title" class="screen">
+  <h1>いつきくんの ぼうけん</h1>
+  <p>あさの じゅんび、いつきくんに おまかせ！</p>
+  <button class="bigbtn" id="btnStart">はじめる</button>
+</div>
+<div id="select" class="screen">
+  <h1>どっちに する？</h1>
+  <div class="scenebtns">
+    <button class="scenebtn" id="btnScene1"><span class="art">🍚</span>あさごはん<span class="flower" id="fl1">🌸</span></button>
+    <button class="scenebtn" id="btnScene2"><span class="art">🎒</span>ようちえん<span class="flower" id="fl2">🌸</span></button>
+  </div>
 </div>
 <script>
 'use strict';
-/* ---------- 定数 ---------- */
-const W = 960, H = 540;                          // 論理座標系（ハーネスの logicalWidth/Height と一致させる）
-const SAVE_KEY = 'html-game-template:starter';
+/* ================= 定数・パラメータ ================= */
+const W = 960, H = 540;                 // 論理座標（ハーネスと一致）
+const FLOOR_TOP = 405, FLOOR_BOT = 500; // いつきくんが歩ける帯
+const SPEED = 250;                      // 歩行速度 px/s（シミュ時間）
+const SPILL_DIST = 170;                 // 「ふたのない みずは、はこぶと こぼれる」距離（D6）
+const DT = 1 / 120;                     // 固定タイムステップ（原則39）
+const PARAMS = new URLSearchParams(location.search);
+const TS = Math.min(20, Math.max(0.25, parseFloat(PARAMS.get('ts')) || 1)); // テスト用加速
 
-/* ---------- 状態 ----------
-   S = 進行状態（セーブ対象・JSON化可能）。新フラグは必ずここに足し、
-       旧セーブに無くても falsy で安全なように設計する
-   G = 揮発状態（モードのみ。セーブしない） */
-const DEF = () => ({ lit: [false, false, false], done: false });
+/* ================= 状態 =================
+   S = 進行状態（JSON化可能。このゲームはセーブしない——仕様§7）
+   G = 揮発状態（G.mode が状態機械） */
+const DEF = () => ({
+  scene: null, variant: null,
+  cleared: { s1: false, s2: false },
+  s1: null, s2: null,
+});
 let S = DEF();
-let G = { mode: 'title' };
+let G = {
+  mode: 'title',            // title → select → play → clear → select
+  simT: 0,                  // シミュレーション時間（全タイマーの基準）
+  it: { x: 480, y: 470, face: 1 }, // いつきくん
+  walk: null,               // {tx,ty,targetId}
+  holding: null,            // {t:'hashi'|'oshibori'|'cups'|'cup'|'pitcher'|'ice'|'suitou'|'lid'|'bento'|'hashiset'|'tube', n?, filled?}
+  carry: 0,                 // 開いた容器＋水を持って歩いた距離
+  pose: null,               // {kind:'umm'|'joy'|'wave'|'huh', until}
+  act: null,                // {kind:'wipe'|'dab', until} 短い動作中は入力を受けない
+  busyUntil: 0,
+  bubbles: [],              // {who:'mama'|'papa'|'it', text, until}
+  fx: [],                   // {kind, x, y, t0, dur}
+  jig: {},                  // ターゲット微アニメ {id: until}
+  atMirror: false,
+  clearAt: 0,               // clear 演出の終了時刻（シミュ時間）
+  faucetRun: 0,             // 蛇口の水が見えている時刻まで
+};
 
-/* ---------- タップ対象（読み取り専用でハーネスに公開。座標は重ねない） ---------- */
+/* 日替わり選択（将来は実日付シードに差し替える前提で1関数に分離。仕様§6） */
+function pickVariant(scene) {
+  const p = PARAMS.get(scene === 's1' ? 'v1' : 'v2');
+  if (p === 'A' || p === 'B') return p; // テスト注入（実入力主義の例外・シード注入と同型）
+  return Math.random() < 0.5 ? 'A' : 'B';
+}
+
+function initScene(scene) {
+  const v = pickVariant(scene);
+  S.scene = scene; S.variant = v;
+  if (scene === 's1') {
+    const seat = () => ({ hashi: false, oshibori: false, cup: 'none' });
+    S.s1 = {
+      seats: { papa: seat(), mama: seat(), itsuki: seat() },
+      papaSeated: v === 'B',
+      oshiboriPile: v === 'B' ? 2 : 3,
+      cupStack: v === 'B' ? 2 : 3,
+      pitcherFilled: false, pitcherHome: true,
+      puddles: [], puddleSeq: 0,
+      done: false,
+    };
+    if (v === 'B') S.s1.seats.papa = { hashi: true, oshibori: true, cup: 'full' }; // パパが自分で用意した
+  } else {
+    S.s2 = {
+      freezerOpen: false, lowerOpen: false, iceTaken: false,
+      icePlace: v === 'B' ? 'lower' : 'freezer',
+      suitou: { ice: false, water: false, closed: false, inBag: false, at: 'counter' },
+      lidAt: 'counter',      // counter | bottle | hand
+      bento: false, hashiset: false,
+      sun: [0, 0, 0], sunDone: false,
+      bagWorn: false,
+      puddles: [], puddleSeq: 0,
+      done: false,
+    };
+  }
+  G.it = { x: 480, y: 470, face: 1 };
+  G.walk = null; G.holding = null; G.carry = 0; G.pose = null; G.act = null;
+  G.bubbles = []; G.fx = []; G.jig = {}; G.atMirror = false; G.busyUntil = 0;
+}
+
+/* ================= レイアウト（tapTargets と draw の単一の真実） ================= */
+const LAY1 = {
+  hashi_src:   { x: 95,  y: 295, rad: 34 },
+  cups_src:    { x: 185, y: 295, rad: 34 },
+  oshibori_src:{ x: 275, y: 290, rad: 34 },
+  seat_papa:   { x: 375, y: 395, rad: 38 },
+  seat_mama:   { x: 485, y: 395, rad: 38 },
+  seat_itsuki: { x: 595, y: 395, rad: 38 },
+  papa:        { x: 415, y: 262, rad: 34 },
+  mama:        { x: 555, y: 262, rad: 34 },
+  pitcher:     { x: 735, y: 305, rad: 32 },
+  faucet:      { x: 815, y: 272, rad: 32 },
+  suihanki:    { x: 900, y: 335, rad: 32 },
+};
+const LAY2 = {
+  freezer: { x: 85,  y: 245, rad: 34 },
+  lower:   { x: 85,  y: 345, rad: 34 },
+  ice_f:   { x: 165, y: 250, rad: 30 },
+  ice_l:   { x: 165, y: 352, rad: 30 },
+  faucet:  { x: 300, y: 265, rad: 32 },
+  sink:    { x: 300, y: 345, rad: 32 },
+  suitou:  { x: 380, y: 305, rad: 32 },
+  lid:     { x: 435, y: 275, rad: 28 },  // フタの置き場。閉めた後はゴーストが残り「戻す＝開ける」（D8・D13）
+  bento:   { x: 560, y: 305, rad: 32 },
+  hashiset:{ x: 615, y: 345, rad: 30 },
+  bag:     { x: 660, y: 445, rad: 40 },
+  tube:    { x: 715, y: 290, rad: 30 },
+  mirror:  { x: 790, y: 215, rad: 36 },
+  door:    { x: 905, y: 270, rad: 40 },
+  mama:    { x: 200, y: 430, rad: 36 },
+  fz0:     { x: 790, y: 120, rad: 32 }, // ひたい
+  fz1:     { x: 725, y: 185, rad: 32 }, // ひだりほほ
+  fz2:     { x: 855, y: 185, rad: 32 }, // みぎほほ
+};
+
+/* ---------- タップ対象（読み取り専用でハーネスに公開） ---------- */
 function tapTargets() {
-  return [
-    { id: 'a', x: 240, y: 300, rad: 46 },
-    { id: 'b', x: 480, y: 220, rad: 46 },
-    { id: 'c', x: 720, y: 340, rad: 46 },
-  ];
+  if (G.mode !== 'play') return [];
+  const out = [];
+  const add = (id, l) => out.push({ id, x: l.x, y: l.y, rad: l.rad });
+  if (S.scene === 's1') {
+    const s = S.s1;
+    add('hashi_src', LAY1.hashi_src);
+    if (s.cupStack > 0 || (G.holding && G.holding.t === 'cups')) add('cups_src', LAY1.cups_src);
+    if (s.oshiboriPile > 0 || (G.holding && G.holding.t === 'oshibori')) add('oshibori_src', LAY1.oshibori_src);
+    add('seat_papa', LAY1.seat_papa); add('seat_mama', LAY1.seat_mama); add('seat_itsuki', LAY1.seat_itsuki);
+    add('papa', LAY1.papa); add('mama', LAY1.mama);
+    if (s.pitcherHome || (G.holding && G.holding.t === 'pitcher')) add('pitcher', LAY1.pitcher);
+    add('faucet', LAY1.faucet); add('suihanki', LAY1.suihanki);
+    for (const p of s.puddles) out.push({ id: p.id, x: p.x, y: p.y, rad: 32 });
+  } else if (S.scene === 's2') {
+    const s = S.s2;
+    add('freezer', LAY2.freezer); add('lower', LAY2.lower);
+    if (!s.iceTaken && !(G.holding && G.holding.t === 'ice')) {
+      if (s.icePlace === 'freezer' && s.freezerOpen) add('ice', LAY2.ice_f);
+      if (s.icePlace === 'lower' && s.lowerOpen) add('ice', LAY2.ice_l);
+    }
+    add('faucet', LAY2.faucet); add('sink', LAY2.sink);
+    if (!s.suitou.inBag) add('suitou', LAY2.suitou); // 持っている間は「戻す先」として残す（D8）
+    if (!s.suitou.inBag) add('lid', LAY2.lid);       // フタが手・ボトル上にあっても置き場は残る（戻す＝開ける。D13）
+    if (!s.bento || (G.holding && G.holding.t === 'bento')) add('bento', LAY2.bento);
+    if (!s.hashiset || (G.holding && G.holding.t === 'hashiset')) add('hashiset', LAY2.hashiset);
+    if (!s.bagWorn) add('bag', LAY2.bag);
+    if (!s.sunDone || (G.holding && G.holding.t === 'tube')) add('tube', LAY2.tube);
+    add('mirror', LAY2.mirror); add('mama', LAY2.mama); add('door', LAY2.door);
+    if (G.atMirror && !s.sunDone) { add('fz0', LAY2.fz0); add('fz1', LAY2.fz1); add('fz2', LAY2.fz2); }
+    for (const p of s.puddles) out.push({ id: p.id, x: p.x, y: p.y, rad: 32 });
+  }
+  return out;
 }
 
-/* ---------- セーブ ---------- */
-function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) {} }
-function loadSave() {
-  try { const j = localStorage.getItem(SAVE_KEY); return j ? reconcileSave(Object.assign(DEF(), JSON.parse(j))) : null; }
-  catch (e) { return null; }
+/* ================= 音（Web Audio 合成のみ・BGMなし） ================= */
+let AC = null, master = null, muted = false;
+function unlockAudio() {
+  try {
+    if (!AC) {
+      AC = new (window.AudioContext || window.webkitAudioContext)();
+      const comp = AC.createDynamicsCompressor();
+      master = AC.createGain(); master.gain.value = muted ? 0 : 0.85;
+      master.connect(comp); comp.connect(AC.destination);
+    }
+    if (AC.state !== 'running') AC.resume();
+  } catch (e) {}
 }
-/* 逆算修復の見本：done は lit の純粋な導出値なので、旧セーブに done が無い／壊れていても
-   lit から再計算して安全に保てる。実ゲーム化するときは「導出フラグ（再計算してよい）」と
-   「操作で確定するフラグ（reconcileSave は補完のみ・取り消し禁止）」を区別すること */
-function reconcileSave(s) {
-  if (!Array.isArray(s.lit) || s.lit.length !== 3) s.lit = [false, false, false];
-  s.lit = s.lit.map(Boolean);
-  s.done = s.lit.every(Boolean);
-  return s;
+// iOS は pointerdown を解錠ジェスチャと認めないことがある → touchend/click で走るまで再試行（原則25）
+for (const ev of ['touchend', 'click']) {
+  document.addEventListener(ev, () => { if (AC && AC.state !== 'running') AC.resume(); }, { passive: true });
 }
+function tone(f0, f1, dur, { type = 'sine', vol = 0.25, delay = 0 } = {}) {
+  if (!AC || !master) return;
+  const t = AC.currentTime + delay;
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(f0, t);                       // アンカーしてからランプ（原則26）
+  if (f1 !== f0) o.frequency.linearRampToValueAtTime(f1, t + dur);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.linearRampToValueAtTime(vol, t + 0.015);
+  g.gain.linearRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(master);
+  o.start(t); o.stop(t + dur + 0.02);
+}
+function noise(dur, { freq = 1200, q = 0.7, vol = 0.2, delay = 0, fall = 0 } = {}) {
+  if (!AC || !master) return;
+  const t = AC.currentTime + delay;
+  const n = Math.floor(AC.sampleRate * dur);
+  const buf = AC.createBuffer(1, n, AC.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+  const src = AC.createBufferSource(); src.buffer = buf;
+  const f = AC.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = q;
+  f.frequency.setValueAtTime(freq, t);
+  if (fall) f.frequency.linearRampToValueAtTime(Math.max(80, freq - fall), t + dur);
+  const g = AC.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.linearRampToValueAtTime(vol, t + 0.02);
+  g.gain.linearRampToValueAtTime(0.0001, t + dur);
+  src.connect(f); f.connect(g); g.connect(master);
+  src.start(t); src.stop(t + dur + 0.02);
+}
+const SFX = {
+  tapAck: () => tone(520, 700, 0.07, { vol: 0.12 }),
+  pick:   () => tone(620, 940, 0.1, { vol: 0.2 }),
+  place:  () => tone(360, 250, 0.12, { type: 'triangle', vol: 0.25 }),
+  clink:  () => tone(1250, 1180, 0.09, { vol: 0.18 }),
+  pour:   () => noise(0.55, { freq: 900, q: 0.8, vol: 0.16, fall: 300 }),
+  fill:   () => { tone(700, 1000, 0.1, { vol: 0.15 }); tone(1000, 1300, 0.1, { vol: 0.13, delay: 0.09 }); },
+  splash: () => { noise(0.3, { freq: 1600, q: 0.6, vol: 0.22, fall: 900 }); tone(500, 200, 0.22, { type: 'triangle', vol: 0.12 }); },
+  wipe:   () => { tone(900, 1050, 0.08, { vol: 0.14 }); tone(1050, 900, 0.08, { vol: 0.14, delay: 0.1 }); },
+  umm:    () => { tone(392, 440, 0.16, { type: 'triangle', vol: 0.14 }); tone(440, 392, 0.18, { type: 'triangle', vol: 0.12, delay: 0.17 }); }, // 明るめ・罰にしない
+  joy:    () => { [523, 659, 784, 1047].forEach((f, i) => tone(f, f, 0.14, { vol: 0.2, delay: i * 0.09 })); },
+  clear:  () => { [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, f, 0.22, { vol: 0.2, delay: i * 0.11 })); noise(0.5, { freq: 4000, q: 0.4, vol: 0.05, delay: 0.4 }); },
+  steam:  () => noise(0.35, { freq: 2600, q: 0.5, vol: 0.12 }),
+  doorOpen:() => tone(300, 380, 0.15, { type: 'triangle', vol: 0.18 }),
+  click:  () => tone(820, 780, 0.06, { vol: 0.15 }),
+  tapu:   () => { tone(240, 260, 0.12, { vol: 0.13 }); tone(260, 235, 0.12, { vol: 0.11, delay: 0.13 }); },
+  dab:    () => tone(980, 1150, 0.08, { vol: 0.16 }),
+  pop:    () => tone(600, 860, 0.07, { vol: 0.14 }),
+};
 
-/* ---------- HUD ---------- */
+/* ================= ヘルパ ================= */
 const $ = id => document.getElementById(id);
-function updateProg() { $('prog').textContent = `灯 ${S.lit.filter(Boolean).length}/3`; }
+function bubble(who, text, dur = 2.4) { G.bubbles.push({ who, text, until: G.simT + dur }); G.lastBubble = { who, text }; SFX.pop(); }
+function jiggle(id, dur = 0.7) { G.jig[id] = G.simT + dur; }
+function fx(kind, x, y, dur = 0.6, extra = {}) { G.fx.push(Object.assign({ kind, x, y, t0: G.simT, dur }, extra)); }
+function pose(kind, dur = 0.9) { G.pose = { kind, until: G.simT + dur }; }
+function umm(hintId) { pose('umm', 1.0); SFX.umm(); if (hintId) jiggle(hintId); }
+function layOf(id) {
+  const L = S.scene === 's1' ? LAY1 : LAY2;
+  if (L[id]) return L[id];
+  if (id === 'ice') return S.s2.icePlace === 'lower' ? LAY2.ice_l : LAY2.ice_f;
+  const pud = (S.scene === 's1' ? S.s1 : S.s2).puddles.find(p => p.id === id);
+  if (pud) return { x: pud.x, y: pud.y, rad: 32 };
+  return null;
+}
+function standPoint(l) {
+  return { x: Math.max(40, Math.min(W - 40, l.x)), y: Math.max(FLOOR_TOP, Math.min(FLOOR_BOT, l.y + 55)) };
+}
+function holdingOpenWater() {
+  const h = G.holding;
+  if (!h) return false;
+  if ((h.t === 'cup' || h.t === 'cups') && h.filled) return true;
+  if (h.t === 'suitou' && S.s2 && S.s2.suitou.water && !S.s2.suitou.closed) return true;
+  return false;
+}
+function addPuddle(x, y) {
+  const s = S.scene === 's1' ? S.s1 : S.s2;
+  const py = Math.max(FLOOR_TOP, Math.min(FLOOR_BOT, y)) + 12;
+  // 既存ターゲットの近くに湧かせない（判定の横取り防止。監査所見→クリアランス70px）
+  let px = Math.max(50, Math.min(W - 50, x));
+  const ts = tapTargets();
+  for (const off of [0, -70, 70, -140, 140, -210, 210]) {
+    const cx = Math.max(50, Math.min(W - 50, px + off));
+    if (ts.every(t => Math.hypot(t.x - cx, t.y - py) >= 70)) { px = cx; break; }
+  }
+  s.puddles.push({ id: 'puddle' + (s.puddleSeq++), x: px, y: py });
+}
 
-/* ---------- 入力（canvas は実タップのみ） ---------- */
+/* ================= 入力（canvas は実タップのみ） ================= */
 function toLogical(ev) {
   const r = $('cv').getBoundingClientRect();
   return { x: (ev.clientX - r.left) / r.width * W, y: (ev.clientY - r.top) / r.height * H };
 }
 $('cv').addEventListener('pointerdown', ev => {
-  if (G.mode !== 'play') return;
+  ev.preventDefault();
+  unlockAudio();
+  if (G.mode !== 'play') return;                    // モード外の入力は既定遮断（原則42）
+  if (G.act && G.simT < G.act.until) return;        // 短い動作中（ふき・ぬり）は待つ
   const p = toLogical(ev);
-  // 最近傍ヒット（同座標は常に曖昧なので、そもそも座標を重ねない設計にしている）
+  fx('ripple', p.x, p.y, 0.45);                     // 受理は即時・その場所に（D7・原則33）
+  SFX.tapAck();
   let hit = null, best = 1e9;
   for (const t of tapTargets()) {
     const d = Math.hypot(t.x - p.x, t.y - p.y);
     if (d < t.rad && d < best) { best = d; hit = t; }
   }
-  if (!hit) return;
-  const i = tapTargets().findIndex(t => t.id === hit.id);
-  if (S.lit[i]) return; // 点灯済みの再タップは無反応（状態を変えない）
-  // 進行フラグの確定とセーブはタップの瞬間に同期的に行う（演出やタイマーの中で確定させない）
-  S.lit[i] = true;
-  if (S.lit.every(Boolean)) S.done = true;
-  save();
-  updateProg();
+  if (hit && hit.id.startsWith('fz') && G.atMirror) { interact(hit.id); return; } // 鏡の前では接触済み
+  const dest = hit ? standPoint(layOf(hit.id)) : { x: Math.max(40, Math.min(W - 40, p.x)), y: Math.max(FLOOR_TOP, Math.min(FLOOR_BOT, p.y)) };
+  if (hit && !hit.id.startsWith('fz') && G.atMirror) G.atMirror = false;
+  if (!hit && G.atMirror) G.atMirror = false;
+  G.walk = { tx: dest.x, ty: dest.y, targetId: hit ? hit.id : null }; // 移動中の上書き可（仕様§3.1）
+  if (dest.x !== G.it.x) G.it.face = dest.x > G.it.x ? 1 : -1;
 });
+document.addEventListener('dblclick', e => e.preventDefault());
 
-/* ---------- タイトル／セーブ操作 ---------- */
-function enterPlay() { $('title').style.display = 'none'; G.mode = 'play'; updateProg(); }
-/* DOM ボタンは click で拾う（タッチ・マウス・キーボードの標準挙動を活かす。
-   実タップ主義が要るのは遊び場＝canvas 側だけ） */
-$('btnStart').addEventListener('click', () => { S = DEF(); save(); enterPlay(); });
-$('btnCont').addEventListener('click', () => { const s = loadSave(); if (s) { S = s; enterPlay(); } });
-if (!loadSave()) $('btnCont').style.display = 'none';
-
-$('btnReset').addEventListener('click', () => { S = DEF(); save(); updateProg(); });
-
-/* ---------- デバッグ（?debug。ハーネスでは使わない） ---------- */
-if (location.search.includes('debug')) {
-  const box = document.createElement('div');
-  box.id = 'dbg';
-  box.innerHTML = '<button class="hbtn">全部灯す</button>';
-  $('dock').appendChild(box);
-  box.querySelector('button').addEventListener('click', () => {
-    S.lit = [true, true, true]; S.done = true; save(); updateProg();
-  });
+/* ================= 接触時の結果（進行フラグはここで同期確定。D7） ================= */
+function interact(id) {
+  if (S.scene === 's1') interact1(id); else interact2(id);
 }
 
-/* ---------- レイアウト（fitCanvas がバー分を差し引く＝UIは遊び場に重ねない） ---------- */
+function checkClear1() {
+  const s = S.s1;
+  const ok = ['papa', 'mama', 'itsuki'].every(k => { const e = s.seats[k]; return e.hashi && e.oshibori && e.cup === 'full'; });
+  if (!ok || s.done) return;
+  s.done = true; S.cleared.s1 = true;               // 確定は接触の瞬間・同期（演出はこの後）
+  s.papaSeated = true;
+  G.mode = 'clear'; G.clearAt = G.simT + 3.0;
+  G.holding = null; G.walk = null; G.atMirror = false;
+  bubble('papa', 'いただきます', 2.6); bubble('mama', 'いただきます', 2.6);
+  pose('joy', 2.6); SFX.clear();
+}
+
+function interact1(id) {
+  const s = S.s1, h = G.holding;
+  switch (true) {
+    case id === 'hashi_src': {
+      if (!h) { G.holding = { t: 'hashi' }; SFX.pick(); jiggle(id); }
+      else if (h.t === 'hashi') { G.holding = null; SFX.place(); jiggle(id); } // もどす（D8）
+      else jiggle(id);
+      break;
+    }
+    case id === 'cups_src': {
+      if (!h && s.cupStack > 0) { G.holding = { t: 'cups', n: s.cupStack, filled: false }; s.cupStack = 0; G.carry = 0; SFX.pick(); }
+      else if (h && h.t === 'cups' && h.filled) { fx('tapu', LAY1.cups_src.x, LAY1.cups_src.y - 20, 0.7); SFX.tapu(); umm(); } // 水入りは棚に戻せない（世界のルールの一貫性）
+      else if (h && h.t === 'cups') { s.cupStack = h.n; G.holding = null; SFX.place(); }
+      else jiggle(id);
+      break;
+    }
+    case id === 'oshibori_src': {
+      if (!h && s.oshiboriPile > 0) { G.holding = { t: 'oshibori', n: s.oshiboriPile }; s.oshiboriPile = 0; SFX.pick(); }
+      else if (h && h.t === 'oshibori') { s.oshiboriPile = h.n; G.holding = null; SFX.place(); }
+      else jiggle(id);
+      break;
+    }
+    case id === 'pitcher': {
+      if (!h && s.pitcherHome) { G.holding = { t: 'pitcher', filled: s.pitcherFilled }; s.pitcherHome = false; SFX.pick(); }
+      else if (h && h.t === 'pitcher') { s.pitcherHome = true; s.pitcherFilled = h.filled; G.holding = null; SFX.place(); }
+      else jiggle(id);
+      break;
+    }
+    case id === 'faucet': {
+      G.faucetRun = G.simT + 0.8; fx('waterjet', LAY1.faucet.x, LAY1.faucet.y + 18, 0.8); SFX.pour();
+      if (h && h.t === 'pitcher' && !h.filled) { h.filled = true; s.pitcherFilled = true; G.carry = 0; SFX.fill(); fx('sparkle', G.it.x, G.it.y - 90, 0.6); }
+      else if (h && (h.t === 'cup' || h.t === 'cups') && !h.filled) { h.filled = true; G.carry = 0; SFX.fill(); fx('sparkle', G.it.x, G.it.y - 90, 0.6); }
+      break;
+    }
+    case id === 'suihanki': { jiggle(id); fx('steam', LAY1.suihanki.x, LAY1.suihanki.y - 30, 0.9); SFX.steam(); break; }
+    case id === 'papa': { jiggle(id); bubble('papa', s.papaSeated ? 'おなか ぺこぺこ' : 'おはよう'); break; }
+    case id === 'mama': { jiggle(id); bubble('mama', 'おはよう'); break; }
+    case id.startsWith('seat_'): {
+      const key = id.slice(5), seat = s.seats[key];
+      if (h && h.t === 'hashi') {
+        if (!seat.hashi) { seat.hashi = true; G.holding = null; SFX.place(); fx('sparkle', LAY1[id].x + 22, LAY1[id].y + 8, 0.5); checkClear1(); }
+        else if (key === 'papa' && S.variant === 'B') { bubble('papa', 'もう あるよ'); umm(); }
+        else umm(id);
+      } else if (h && h.t === 'oshibori') {
+        if (!seat.oshibori) {
+          seat.oshibori = true; h.n--; SFX.place(); fx('sparkle', LAY1[id].x - 22, LAY1[id].y + 8, 0.5);
+          if (h.n <= 0) G.holding = null;
+          checkClear1();
+        } else umm(id);
+      } else if (h && h.t === 'cups') {
+        if (seat.cup === 'none') {
+          seat.cup = h.filled ? 'full' : 'empty'; h.filled = false; h.n--; SFX.place();
+          if (h.n <= 0) G.holding = null;
+          checkClear1();
+        } else umm(id);
+      } else if (h && h.t === 'cup') {
+        if (seat.cup === 'none') { seat.cup = h.filled ? 'full' : 'empty'; G.holding = null; SFX.place(); checkClear1(); }
+        else umm(id);
+      } else if (h && h.t === 'pitcher') {
+        if (seat.cup === 'empty' && h.filled) { seat.cup = 'full'; SFX.pour(); fx('pourjet', LAY1[id].x, LAY1[id].y - 20, 0.5); fx('sparkle', LAY1[id].x, LAY1[id].y - 14, 0.6); checkClear1(); }
+        else if (seat.cup === 'empty' && !h.filled) { umm('faucet'); }        // 何も出ない→蛇口がヒント
+        else if (seat.cup === 'none') { umm('cups_src'); }                    // コップがまだ
+        else { fx('tapu', LAY1[id].x, LAY1[id].y - 14, 0.7); SFX.tapu(); }    // もういっぱい
+      } else if (!h) {
+        if (seat.cup === 'empty') { seat.cup = 'none'; G.holding = { t: 'cup', filled: false }; G.carry = 0; SFX.pick(); }
+        else if (seat.cup === 'full') { fx('tapu', LAY1[id].x, LAY1[id].y - 14, 0.7); SFX.tapu(); } // 定着済みは動かさない
+        else jiggle(id);
+      } else jiggle(id);
+      break;
+    }
+    case id.startsWith('puddle'): {
+      const i = s.puddles.findIndex(p => p.id === id);
+      if (i >= 0) { s.puddles.splice(i, 1); G.act = { kind: 'wipe', until: G.simT + 0.7 }; G.busyUntil = G.simT + 0.7; SFX.wipe(); fx('sparkle', layOf(id) ? layOf(id).x : G.it.x, G.it.y, 0.8); }
+      break;
+    }
+    default: jiggle(id);
+  }
+}
+
+function gateMissing2() {
+  const s = S.s2, b = s.suitou;
+  if (!b.inBag) {
+    if (!b.ice) return { text: 'こおりは？', hint: s.icePlace === 'lower' ? 'lower' : 'freezer' };
+    if (!b.water) return { text: 'おみずは？', hint: 'faucet' };
+    if (!b.closed) return { text: 'ふたは？', hint: 'lid' };
+    return { text: 'すいとうは？', hint: 'suitou' };
+  }
+  if (!s.bento) return { text: 'おべんとうは？', hint: 'bento' };
+  if (!s.hashiset) return { text: 'おはしは？', hint: 'hashiset' };
+  if (!s.sunDone) return { text: 'ぬりぬりは？', hint: 'tube' };
+  if (!s.bagWorn) return { text: 'かばんは？', hint: 'bag' };
+  return null;
+}
+
+function interact2(id) {
+  const s = S.s2, h = G.holding, b = s.suitou;
+  switch (true) {
+    case id === 'freezer': {
+      if (!s.freezerOpen) { s.freezerOpen = true; SFX.doorOpen(); }
+      jiggle(id);
+      if (h && h.t === 'ice' && s.icePlace === 'freezer') { s.iceTaken = false; G.holding = null; SFX.place(); break; } // もどす（D8）
+      if (s.freezerOpen && s.icePlace !== 'freezer' && !s.iceTaken) umm(); // 空っぽ→困るのは本人
+      break;
+    }
+    case id === 'lower': {
+      if (!s.lowerOpen) { s.lowerOpen = true; SFX.doorOpen(); }
+      jiggle(id);
+      if (h && h.t === 'ice' && s.icePlace === 'lower') { s.iceTaken = false; G.holding = null; SFX.place(); } // もどす（D8）
+      break;
+    }
+    case id === 'ice': {
+      if (!h && !s.iceTaken) { s.iceTaken = true; G.holding = { t: 'ice' }; SFX.clink(); }
+      else jiggle(id);
+      break;
+    }
+    case id === 'suitou': {
+      if (b.at === 'counter') {
+        if (h && h.t === 'ice') {
+          if (b.water) { fx('tapu', LAY2.suitou.x, LAY2.suitou.y - 24, 0.8); SFX.tapu(); umm(); } // 水が先だと入らない
+          else if (b.closed) { umm('lid'); }
+          else { b.ice = true; s.iceTaken = true; G.holding = null; SFX.clink(); fx('sparkle', LAY2.suitou.x, LAY2.suitou.y - 20, 0.5); }
+        } else if (h && h.t === 'lid') {
+          if (!b.closed) { b.closed = true; s.lidAt = 'bottle'; G.holding = null; SFX.click(); }
+          else jiggle(id);
+        } else if (!h) { b.at = 'hand'; G.holding = { t: 'suitou' }; G.carry = 0; SFX.pick(); }
+        else jiggle(id);
+      } else if (h && h.t === 'suitou') { b.at = 'counter'; G.holding = null; SFX.place(); } // もどす（D8）
+      else jiggle(id);
+      break;
+    }
+    case id === 'lid': {
+      if (h && h.t === 'suitou') {
+        if (!b.closed && s.lidAt === 'counter') { b.closed = true; s.lidAt = 'bottle'; SFX.click(); fx('sparkle', LAY2.lid.x, LAY2.lid.y - 10, 0.4); }
+        else if (b.closed && s.lidAt === 'bottle') { b.closed = false; s.lidAt = 'counter'; SFX.click(); jiggle(id); } // フタを置き場に戻す＝開ける（D8・D13）
+        else jiggle(id);
+      } else if (!h && s.lidAt === 'counter') { G.holding = { t: 'lid' }; s.lidAt = 'hand'; SFX.pick(); }
+      else if (h && h.t === 'lid') { G.holding = null; s.lidAt = 'counter'; SFX.place(); }
+      else jiggle(id);
+      break;
+    }
+    case id === 'faucet': {
+      G.faucetRun = G.simT + 0.8; fx('waterjet', LAY2.faucet.x, LAY2.faucet.y + 18, 0.8); SFX.pour();
+      if (h && h.t === 'suitou') {
+        if (b.closed) { umm('lid'); }                                      // フタが邪魔→置き場（ゴースト）がヒント
+        else if (!b.water) { b.water = true; G.carry = 0; SFX.fill(); fx('sparkle', G.it.x, G.it.y - 90, 0.6); }
+        else { fx('tapu', G.it.x, G.it.y - 90, 0.7); SFX.tapu(); }
+      }
+      break;
+    }
+    case id === 'sink': {
+      if (h && h.t === 'suitou' && b.water && !b.closed) { b.water = false; SFX.pour(); fx('waterjet', LAY2.sink.x, LAY2.sink.y - 6, 0.6); } // あける（仕様§3.3）
+      else { jiggle(id); fx('drip', LAY2.sink.x, LAY2.sink.y - 10, 0.5); }
+      break;
+    }
+    case id === 'bento': {
+      if (!h && !s.bento) { G.holding = { t: 'bento' }; SFX.pick(); }
+      else if (h && h.t === 'bento') { G.holding = null; SFX.place(); }
+      else jiggle(id);
+      break;
+    }
+    case id === 'hashiset': {
+      if (!h && !s.hashiset) { G.holding = { t: 'hashiset' }; SFX.pick(); }
+      else if (h && h.t === 'hashiset') { G.holding = null; SFX.place(); }
+      else jiggle(id);
+      break;
+    }
+    case id === 'bag': {
+      if (h && h.t === 'suitou') {
+        if (b.ice && b.water && b.closed) { b.inBag = true; b.at = 'bag'; G.holding = null; SFX.place(); fx('sparkle', LAY2.bag.x, LAY2.bag.y - 20, 0.6); }
+        else { // まだ準備できていない→足りないものが世界側でヒントを出す（原則3・49の部分反応）
+          umm();
+          if (!b.closed) jiggle('lid');
+          if (!b.water) jiggle('faucet');
+          if (!b.ice) jiggle(s.icePlace === 'lower' ? 'lower' : 'freezer');
+        }
+      } else if (h && h.t === 'bento') { s.bento = true; G.holding = null; SFX.place(); fx('sparkle', LAY2.bag.x, LAY2.bag.y - 20, 0.6); }
+      else if (h && h.t === 'hashiset') { s.hashiset = true; G.holding = null; SFX.place(); fx('sparkle', LAY2.bag.x, LAY2.bag.y - 20, 0.6); }
+      else if (h) { umm(); jiggle(id); }
+      else if (b.inBag && s.bento && s.hashiset) { s.bagWorn = true; SFX.joy(); pose('joy', 1.2); }
+      else jiggle(id);
+      break;
+    }
+    case id === 'tube': {
+      if (!h && !s.sunDone) { G.holding = { t: 'tube' }; SFX.pick(); }
+      else if (h && h.t === 'tube') { G.holding = null; SFX.place(); }
+      else jiggle(id);
+      break;
+    }
+    case id === 'mirror': {
+      jiggle(id);
+      if (h && h.t === 'tube' && !s.sunDone) { G.atMirror = true; SFX.pop(); fx('sparkle', LAY2.mirror.x, LAY2.mirror.y, 0.5); }
+      else fx('shine', LAY2.mirror.x, LAY2.mirror.y, 0.6);
+      break;
+    }
+    case id.startsWith('fz'): {
+      if (!G.atMirror || s.sunDone || !(h && h.t === 'tube')) break;
+      const i = +id.slice(2);
+      if (!s.sun[i]) {
+        s.sun[i] = 1; SFX.dab(); fx('sparkle', LAY2[id].x, LAY2[id].y, 0.5);
+        G.act = { kind: 'dab', until: G.simT + 0.25 }; G.busyUntil = G.simT + 0.25;
+        if (s.sun.every(v => v)) {                         // 3ヶ所で完了——確定はこのタップの瞬間
+          s.sunDone = true; G.holding = null; pose('joy', 1.1); SFX.joy();
+          fx('shine', LAY2.mirror.x, LAY2.mirror.y - 40, 1.0);
+        }
+      } else { fx('shine', LAY2[id].x, LAY2[id].y, 0.4); }
+      break;
+    }
+    case id === 'mama': {
+      jiggle(id);
+      if (S.variant === 'B' && !s.iceTaken && !b.ice) bubble('mama', 'れいぞうこの したよ');
+      else bubble('mama', 'いってらっしゃい');
+      break;
+    }
+    case id.startsWith('puddle'): {
+      const i = s.puddles.findIndex(p => p.id === id);
+      if (i >= 0) { s.puddles.splice(i, 1); G.act = { kind: 'wipe', until: G.simT + 0.7 }; G.busyUntil = G.simT + 0.7; SFX.wipe(); fx('sparkle', G.it.x, G.it.y, 0.8); }
+      break;
+    }
+    case id === 'door': {
+      jiggle(id);
+      const miss = gateMissing2();
+      if (!miss) {
+        s.done = true; S.cleared.s2 = true;                // 確定は接触の瞬間・同期
+        G.mode = 'clear'; G.clearAt = G.simT + 3.0;
+        G.walk = null; G.atMirror = false;
+        bubble('it', 'いってきます！', 2.6); bubble('mama', 'いってらっしゃい！', 2.6);
+        pose('wave', 2.6); SFX.clear();
+      } else {
+        bubble('mama', miss.text); jiggle(miss.hint);      // 忘れ物ゲート（仕様§5.2）
+      }
+      break;
+    }
+    default: jiggle(id);
+  }
+}
+
+/* ================= シミュレーション（固定Δt。全タイマーはシミュ時間基準） ================= */
+function sim(dt) {
+  G.simT += dt;
+  if (G.walk && G.mode === 'play') {
+    const w = G.walk, dx = w.tx - G.it.x, dy = w.ty - G.it.y;
+    const d = Math.hypot(dx, dy), step = SPEED * dt;
+    if (d <= step) {
+      G.it.x = w.tx; G.it.y = w.ty;
+      const t = w.targetId; G.walk = null;
+      if (t) interact(t);                                  // 結果は接触の瞬間（D7）
+    } else {
+      G.it.x += dx / d * step; G.it.y += dy / d * step;
+      if (holdingOpenWater()) {                            // 世界のルール（D6）
+        G.carry += step;
+        if (G.carry > SPILL_DIST) {
+          const h = G.holding;
+          if (h.t === 'suitou') S.s2.suitou.water = false; else h.filled = false;
+          G.carry = 0;
+          addPuddle(G.it.x, G.it.y + 8);
+          SFX.splash(); fx('splash', G.it.x, G.it.y - 10, 0.6); pose('huh', 0.8);
+        }
+      }
+    }
+  }
+  if (G.pose && G.simT >= G.pose.until) G.pose = null;
+  if (G.act && G.simT >= G.act.until) G.act = null;
+  G.bubbles = G.bubbles.filter(bb => G.simT < bb.until);
+  G.fx = G.fx.filter(f => G.simT < f.t0 + f.dur);
+  if (G.mode === 'clear' && G.simT >= G.clearAt) enterSelect(); // 遅延遷移は発火時にモード再検証（原則22）
+}
+
+/* ================= モード遷移（DOM 画面） ================= */
+function show(el, on) { el.style.display = on ? 'flex' : 'none'; }
+function enterTitle() { G.mode = 'title'; show($('title'), true); show($('select'), false); $('btnBack').style.display = 'none'; }
+function enterSelect() {
+  if (G.mode !== 'clear' && G.mode !== 'title' && G.mode !== 'play') return;
+  G.mode = 'select'; S.scene = null;
+  show($('title'), false); show($('select'), true);
+  $('btnBack').style.display = 'none'; hideConfirm();
+  $('fl1').style.display = S.cleared.s1 ? 'block' : 'none';
+  $('fl2').style.display = S.cleared.s2 ? 'block' : 'none';
+  $('title-label').textContent = 'いつきくんの ぼうけん';
+}
+function startScene(scene) {
+  initScene(scene);
+  G.mode = 'play';
+  show($('title'), false); show($('select'), false);
+  $('btnBack').style.display = 'inline-block'; hideConfirm();
+  $('title-label').textContent = scene === 's1' ? 'あさごはんの じゅんび' : 'ようちえんの じゅんび';
+  if (scene === 's1') bubble('mama', 'じゅんび おねがいね', 3.0);
+  else bubble('mama', 'ようちえんの じゅんびだよ', 3.0);
+}
+/* もどるは2段階確認（誤タップで進行が消えない。仕様§7・所見9） */
+function hideConfirm() { $('hudConfirm').style.display = 'none'; if (G.mode === 'play') $('btnBack').style.display = 'inline-block'; }
+$('btnBack').addEventListener('click', () => { $('btnBack').style.display = 'none'; $('hudConfirm').style.display = 'flex'; });
+$('btnNo').addEventListener('click', hideConfirm);
+$('btnYes').addEventListener('click', () => { if (G.mode === 'play') { G.mode = 'clear'; enterSelect(); } else hideConfirm(); });
+$('btnStart').addEventListener('click', () => { unlockAudio(); enterSelect(); });
+$('btnScene1').addEventListener('click', () => { unlockAudio(); startScene('s1'); });
+$('btnScene2').addEventListener('click', () => { unlockAudio(); startScene('s2'); });
+$('btnSound').addEventListener('click', () => {
+  muted = !muted;
+  if (master) master.gain.value = muted ? 0 : 0.85;
+  $('btnSound').textContent = muted ? '… おと' : '♪ おと';
+});
+
+/* ================= 描画 ================= */
+const ctx = $('cv').getContext('2d');
+function rr(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
+function circle(x, y, r) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); }
+function jigOff(id, amp = 3) {
+  const u = G.jig[id];
+  if (!u || G.simT >= u) return 0;
+  return Math.sin(G.simT * 42) * amp * ((u - G.simT) / 0.7);
+}
+
+/* --- 小物アイコン（手持ち・卓上・ゴーストで共用） --- */
+function drawHashi(x, y, s = 1) { ctx.strokeStyle = '#a4652c'; ctx.lineWidth = 3 * s; ctx.beginPath(); ctx.moveTo(x - 10 * s, y - 6 * s); ctx.lineTo(x + 12 * s, y + 4 * s); ctx.moveTo(x - 10 * s, y + 1 * s); ctx.lineTo(x + 12 * s, y + 9 * s); ctx.stroke(); }
+function drawOshibori(x, y, s = 1) { ctx.fillStyle = '#eaf6ff'; rr(x - 12 * s, y - 6 * s, 24 * s, 12 * s, 6 * s); ctx.fill(); ctx.strokeStyle = '#9cc4de'; ctx.lineWidth = 1.5; circle(x - 4 * s, y, 4.5 * s); ctx.stroke(); }
+function drawCup(x, y, s = 1, fill = 'none') {
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.moveTo(x - 9 * s, y - 11 * s); ctx.lineTo(x + 9 * s, y - 11 * s); ctx.lineTo(x + 7 * s, y + 9 * s); ctx.lineTo(x - 7 * s, y + 9 * s); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = '#8fb7d8'; ctx.lineWidth = 2; ctx.stroke();
+  if (fill === 'full') { ctx.fillStyle = '#8fd4f5'; ctx.beginPath(); ctx.moveTo(x - 8 * s, y - 6 * s); ctx.lineTo(x + 8 * s, y - 6 * s); ctx.lineTo(x + 7 * s, y + 8 * s); ctx.lineTo(x - 7 * s, y + 8 * s); ctx.closePath(); ctx.fill(); }
+}
+function drawPitcher(x, y, s = 1, filled = false) {
+  ctx.fillStyle = '#fff3fa'; rr(x - 13 * s, y - 14 * s, 26 * s, 30 * s, 8 * s); ctx.fill();
+  if (filled) { ctx.fillStyle = '#8fd4f5'; rr(x - 11 * s, y - 4 * s, 22 * s, 18 * s, 6 * s); ctx.fill(); }
+  ctx.strokeStyle = '#d38bb7'; ctx.lineWidth = 2; rr(x - 13 * s, y - 14 * s, 26 * s, 30 * s, 8 * s); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x - 13 * s, y - 8 * s); ctx.lineTo(x - 21 * s, y - 12 * s); ctx.lineTo(x - 13 * s, y - 2 * s); ctx.closePath(); ctx.fillStyle = '#fff3fa'; ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#d38bb7'; rr(x - 10 * s, y - 19 * s, 20 * s, 6 * s, 3 * s); ctx.fill(); // フタ（閉じた容器の印）
+}
+function drawSuitou(x, y, s, b) {
+  ctx.fillStyle = '#f3fbff'; rr(x - 12 * s, y - 22 * s, 24 * s, 44 * s, 9 * s); ctx.fill();
+  if (b.water) { ctx.fillStyle = '#8fd4f5'; rr(x - 10 * s, y - 8 * s, 20 * s, 28 * s, 7 * s); ctx.fill(); }
+  if (b.ice) { ctx.fillStyle = '#e6f9ff'; ctx.strokeStyle = '#a8dcef'; ctx.lineWidth = 1.5; rr(x - 6 * s, y + 6 * s, 9 * s, 9 * s, 2); ctx.fill(); ctx.stroke(); rr(x - 1 * s, y + 12 * s, 8 * s, 8 * s, 2); ctx.fill(); ctx.stroke(); }
+  ctx.strokeStyle = '#74a8c4'; ctx.lineWidth = 2; rr(x - 12 * s, y - 22 * s, 24 * s, 44 * s, 9 * s); ctx.stroke();
+  if (b.closed) { ctx.fillStyle = '#f2a24b'; rr(x - 9 * s, y - 30 * s, 18 * s, 10 * s, 4 * s); ctx.fill(); }
+  else { ctx.strokeStyle = '#74a8c4'; ctx.beginPath(); ctx.arc(x, y - 22 * s, 8 * s, Math.PI, 0); ctx.stroke(); } // 口があいている
+}
+function drawLid(x, y, s = 1) { ctx.fillStyle = '#f2a24b'; rr(x - 11 * s, y - 6 * s, 22 * s, 12 * s, 5 * s); ctx.fill(); ctx.strokeStyle = '#c77f2f'; ctx.lineWidth = 2; rr(x - 11 * s, y - 6 * s, 22 * s, 12 * s, 5 * s); ctx.stroke(); }
+function drawBento(x, y, s = 1) { ctx.fillStyle = '#ffd76e'; rr(x - 20 * s, y - 12 * s, 40 * s, 24 * s, 6 * s); ctx.fill(); ctx.strokeStyle = '#d9a53c'; ctx.lineWidth = 2; rr(x - 20 * s, y - 12 * s, 40 * s, 24 * s, 6 * s); ctx.stroke(); ctx.fillStyle = '#e2543f'; rr(x - 20 * s, y - 4 * s, 40 * s, 7 * s, 3 * s); ctx.fill(); }
+function drawHashiset(x, y, s = 1) { ctx.fillStyle = '#9fd8a4'; rr(x - 17 * s, y - 6 * s, 34 * s, 12 * s, 6 * s); ctx.fill(); ctx.strokeStyle = '#5da865'; ctx.lineWidth = 2; rr(x - 17 * s, y - 6 * s, 34 * s, 12 * s, 6 * s); ctx.stroke(); }
+function drawIce(x, y, s = 1) { ctx.fillStyle = '#e6f9ff'; ctx.strokeStyle = '#a8dcef'; ctx.lineWidth = 2; rr(x - 9 * s, y - 9 * s, 18 * s, 18 * s, 4); ctx.fill(); ctx.stroke(); ctx.strokeStyle = '#fff'; ctx.beginPath(); ctx.moveTo(x - 4, y - 4); ctx.lineTo(x + 1, y + 1); ctx.stroke(); }
+function drawTube(x, y, s = 1) { ctx.fillStyle = '#fff'; rr(x - 8 * s, y - 14 * s, 16 * s, 26 * s, 5 * s); ctx.fill(); ctx.strokeStyle = '#f0b53f'; ctx.lineWidth = 2; rr(x - 8 * s, y - 14 * s, 16 * s, 26 * s, 5 * s); ctx.stroke(); ctx.fillStyle = '#f0b53f'; rr(x - 5 * s, y - 20 * s, 10 * s, 6 * s, 2); ctx.fill(); circle(x, y - 2, 5 * s); ctx.fillStyle = '#ffd76e'; ctx.fill(); }
+function drawItem(t, x, y, extra) {
+  switch (t) {
+    case 'hashi': drawHashi(x, y); break;
+    case 'oshibori': drawOshibori(x, y); break;
+    case 'cup': drawCup(x, y, 1, extra && extra.filled ? 'full' : 'none'); break;
+    case 'cups': for (let i = 0; i < (extra ? extra.n : 1); i++) drawCup(x, y - i * 8, 1, i === (extra.n - 1) && extra.filled ? 'full' : 'none'); break;
+    case 'pitcher': drawPitcher(x, y, 1, extra && extra.filled); break;
+    case 'ice': drawIce(x, y); break;
+    case 'suitou': drawSuitou(x, y, 0.8, S.s2.suitou); break;
+    case 'lid': drawLid(x, y); break;
+    case 'bento': drawBento(x, y, 0.8); break;
+    case 'hashiset': drawHashiset(x, y, 0.8); break;
+    case 'tube': drawTube(x, y, 0.9); break;
+  }
+}
+function ghost(fn) { ctx.save(); ctx.globalAlpha = 0.20; fn(); ctx.restore(); }
+
+/* --- 人 --- */
+function drawPerson(x, y, opt) {
+  // opt: {h: 身長, skin, shirt, hair, pony, seated, smile, handsUp, wave, tilt, walkT, glasses}
+  const o = opt, hh = o.h || 84;
+  ctx.save(); ctx.translate(x, y);
+  if (o.tilt) ctx.rotate(o.tilt);
+  const legY = 0, bodyH = hh * 0.42, headR = hh * 0.30;
+  // 足
+  ctx.strokeStyle = '#5b6a8c'; ctx.lineWidth = 6; ctx.lineCap = 'round';
+  const sw = o.walkT !== undefined ? Math.sin(o.walkT * 11) * 8 : 0;
+  if (!o.seated) {
+    ctx.beginPath(); ctx.moveTo(-6, legY - hh * 0.18); ctx.lineTo(-6 + sw, legY); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(6, legY - hh * 0.18); ctx.lineTo(6 - sw, legY); ctx.stroke();
+  }
+  // 体
+  ctx.fillStyle = o.shirt;
+  rr(-hh * 0.22, legY - hh * 0.18 - bodyH, hh * 0.44, bodyH, hh * 0.14); ctx.fill();
+  // 腕
+  ctx.strokeStyle = o.shirt; ctx.lineWidth = 6;
+  const shY = legY - hh * 0.18 - bodyH * 0.8;
+  if (o.handsUp) {
+    ctx.beginPath(); ctx.moveTo(-hh * 0.2, shY); ctx.lineTo(-hh * 0.34, shY - hh * 0.24); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(hh * 0.2, shY); ctx.lineTo(hh * 0.34, shY - hh * 0.24); ctx.stroke();
+  } else if (o.wave) {
+    const wv = Math.sin(G.simT * 9) * 0.3;
+    ctx.beginPath(); ctx.moveTo(-hh * 0.2, shY); ctx.lineTo(-hh * 0.3, shY + hh * 0.14); ctx.stroke();
+    ctx.save(); ctx.translate(hh * 0.2, shY); ctx.rotate(-0.9 + wv);
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(hh * 0.3, 0); ctx.stroke(); ctx.restore();
+  } else if (o.pray) {
+    ctx.beginPath(); ctx.moveTo(-hh * 0.2, shY); ctx.lineTo(0, shY + hh * 0.1); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(hh * 0.2, shY); ctx.lineTo(0, shY + hh * 0.1); ctx.stroke();
+  } else {
+    ctx.beginPath(); ctx.moveTo(-hh * 0.2, shY); ctx.lineTo(-hh * 0.28, shY + hh * 0.16); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(hh * 0.2, shY); ctx.lineTo(hh * 0.28, shY + hh * 0.16); ctx.stroke();
+  }
+  // 頭
+  const headY = legY - hh * 0.18 - bodyH - headR + 2;
+  ctx.fillStyle = o.skin; circle(0, headY, headR); ctx.fill();
+  ctx.fillStyle = o.hair;
+  ctx.beginPath(); ctx.arc(0, headY - headR * 0.15, headR * 1.02, Math.PI * 1.05, Math.PI * 1.95); ctx.lineTo(headR * 0.9, headY - headR * 0.3); ctx.closePath(); ctx.fill();
+  if (o.pony) { circle(headR * 0.85, headY - headR * 0.5, headR * 0.34); ctx.fill(); }
+  if (o.glasses) { ctx.strokeStyle = '#6b5a45'; ctx.lineWidth = 2; circle(-headR * 0.36, headY, headR * 0.26); ctx.stroke(); circle(headR * 0.36, headY, headR * 0.26); ctx.stroke(); }
+  // 目・口
+  ctx.fillStyle = '#503a28';
+  const blink = Math.sin(G.simT * 1.7 + x) > 0.97 ? 0.2 : 1;
+  ctx.save(); ctx.scale(1, blink);
+  circle(-headR * 0.32, headY / blink + 1, 2.6); ctx.fill();
+  circle(headR * 0.32, headY / blink + 1, 2.6); ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = '#b35b4a'; ctx.lineWidth = 2;
+  ctx.beginPath();
+  if (o.smile === 'o') { circle(0, headY + headR * 0.4, 4); ctx.stroke(); }
+  else { ctx.arc(0, headY + headR * 0.3, headR * 0.3, 0.2, Math.PI - 0.2); ctx.stroke(); }
+  // ほっぺ
+  ctx.fillStyle = 'rgba(255,150,140,.35)';
+  circle(-headR * 0.55, headY + headR * 0.25, 4); ctx.fill();
+  circle(headR * 0.55, headY + headR * 0.25, 4); ctx.fill();
+  ctx.restore();
+  return headY + y; // 頭の中心の絶対 y（吹き出し用）
+}
+
+function drawItsuki() {
+  const it = G.it;
+  const walking = !!G.walk;
+  const k = G.pose ? G.pose.kind : null;
+  const bob = walking ? Math.abs(Math.sin(G.simT * 11)) * 4 : 0;
+  let tilt = 0, handsUp = false, wave = false, smile = 'smile';
+  if (k === 'umm') { tilt = Math.sin(G.simT * 2.5) * 0.12 + 0.18; smile = 'o'; }
+  if (k === 'huh') { smile = 'o'; }
+  if (k === 'joy') { handsUp = true; }
+  if (k === 'wave') { wave = true; handsUp = false; }
+  const jumpY = k === 'joy' ? -Math.abs(Math.sin(G.simT * 8)) * 10 : 0;
+  ctx.save();
+  if (G.it.face < 0) { ctx.translate(it.x, 0); ctx.scale(-1, 1); ctx.translate(-it.x, 0); }
+  drawPerson(it.x, it.y - bob + jumpY, { h: 78, skin: '#ffd9b0', shirt: '#5aa7e8', hair: '#4a3423', walkT: walking ? G.simT : undefined, tilt, handsUp, wave, smile });
+  ctx.restore();
+  // 持ち物は頭上に
+  if (G.holding) {
+    const hx = it.x, hy = it.y - bob + jumpY - 96;
+    drawItem(G.holding.t, hx, hy, G.holding);
+    if (holdingOpenWater()) { // 水面ゆらゆら（こぼれの予兆）
+      ctx.strokeStyle = 'rgba(120,190,230,.8)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(hx, hy - 16, 8 + Math.sin(G.simT * 10) * 2, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
+    }
+  }
+  // うーんの「？」の代わり：あごに手（描画は簡略に、汗・暗色は使わない）
+  if (k === 'umm') { ctx.fillStyle = '#ffd9b0'; circle(it.x + 14 * G.it.face, it.y - 66, 5); ctx.fill(); }
+}
+
+/* --- 吹き出し（canvas に描く文字はひらがな＋記号のみ。原則40でハーネスが監視） --- */
+function speakerPos(who) {
+  if (who === 'it') return { x: G.it.x, y: G.it.y - 110 };
+  if (S.scene === 's1') {
+    const L = who === 'papa' ? LAY1.papa : LAY1.mama;
+    return { x: L.x, y: L.y - 58 };
+  }
+  return { x: LAY2.mama.x, y: LAY2.mama.y - 120 };
+}
+function drawBubbles() {
+  ctx.font = '20px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const b of G.bubbles) {
+    const p = speakerPos(b.who);
+    const w = ctx.measureText(b.text).width + 26;
+    const x = Math.max(w / 2 + 6, Math.min(W - w / 2 - 6, p.x)), y = Math.max(30, p.y);
+    ctx.fillStyle = '#fff';
+    rr(x - w / 2, y - 19, w, 38, 14); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x - 8, y + 17); ctx.lineTo(x + 4, y + 30); ctx.lineTo(x + 10, y + 17); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#e3c9a0'; ctx.lineWidth = 2; rr(x - w / 2, y - 19, w, 38, 14); ctx.stroke();
+    ctx.fillStyle = '#6b4a2b'; ctx.fillText(b.text, x, y + 1);
+  }
+}
+
+/* --- エフェクト --- */
+function drawFx() {
+  for (const f of G.fx) {
+    const t = (G.simT - f.t0) / f.dur;
+    if (f.kind === 'ripple') {
+      ctx.strokeStyle = `rgba(240,170,80,${1 - t})`; ctx.lineWidth = 3;
+      circle(f.x, f.y, 8 + t * 26); ctx.stroke();
+    } else if (f.kind === 'sparkle') {
+      ctx.fillStyle = `rgba(255,215,110,${1 - t})`;
+      for (let i = 0; i < 5; i++) { const a = i / 5 * Math.PI * 2 + t * 2; circle(f.x + Math.cos(a) * (10 + t * 20), f.y + Math.sin(a) * (10 + t * 20), 3 * (1 - t)); ctx.fill(); }
+    } else if (f.kind === 'steam') {
+      ctx.fillStyle = `rgba(255,255,255,${0.7 * (1 - t)})`;
+      circle(f.x + Math.sin(t * 6) * 6, f.y - t * 40, 10 + t * 10); ctx.fill();
+    } else if (f.kind === 'waterjet' || f.kind === 'pourjet') {
+      ctx.strokeStyle = `rgba(120,190,230,${0.9 * (1 - t * 0.5)})`; ctx.lineWidth = 6;
+      ctx.beginPath(); ctx.moveTo(f.x, f.y); ctx.lineTo(f.x, f.y + 34); ctx.stroke();
+    } else if (f.kind === 'splash') {
+      ctx.fillStyle = `rgba(120,190,230,${1 - t})`;
+      for (let i = 0; i < 6; i++) { const a = Math.PI + i / 5 * Math.PI; circle(f.x + Math.cos(a) * t * 34, f.y + Math.sin(a) * t * 30 + t * t * 40, 3.5); ctx.fill(); }
+    } else if (f.kind === 'tapu') {
+      ctx.strokeStyle = `rgba(120,190,230,${1 - t})`; ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      for (let i = 0; i <= 20; i++) { const px = f.x - 20 + i * 2, py = f.y + Math.sin(i * 0.9 + G.simT * 14) * 3; i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+      ctx.stroke();
+    } else if (f.kind === 'shine') {
+      ctx.strokeStyle = `rgba(255,240,170,${1 - t})`; ctx.lineWidth = 3;
+      for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2 + 0.4; ctx.beginPath(); ctx.moveTo(f.x + Math.cos(a) * 14, f.y + Math.sin(a) * 14); ctx.lineTo(f.x + Math.cos(a) * (22 + t * 14), f.y + Math.sin(a) * (22 + t * 14)); ctx.stroke(); }
+    } else if (f.kind === 'drip') {
+      ctx.fillStyle = `rgba(120,190,230,${1 - t})`; circle(f.x, f.y + t * 20, 3); ctx.fill();
+    }
+  }
+}
+
+function drawPuddles(s) {
+  for (const p of s.puddles) {
+    ctx.fillStyle = 'rgba(140,205,240,.75)';
+    ctx.beginPath(); ctx.ellipse(p.x + jigOff(p.id), p.y, 30, 12, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.beginPath(); ctx.ellipse(p.x - 8, p.y - 3, 8, 3, 0, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+/* --- シーン1: ダイニング --- */
+function drawScene1() {
+  const s = S.s1;
+  // 壁・床
+  const g1 = ctx.createLinearGradient(0, 0, 0, H);
+  g1.addColorStop(0, '#fff2d6'); g1.addColorStop(0.72, '#ffe7bd'); g1.addColorStop(0.72, '#e8b97f'); g1.addColorStop(1, '#dda968');
+  ctx.fillStyle = g1; ctx.fillRect(0, 0, W, H);
+  // 窓と朝日
+  ctx.fillStyle = '#bfe6f7'; rr(390, 60, 180, 120, 12); ctx.fill();
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 5; rr(390, 60, 180, 120, 12); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(480, 60); ctx.lineTo(480, 180); ctx.moveTo(390, 120); ctx.lineTo(570, 120); ctx.stroke();
+  ctx.fillStyle = '#ffdf7e'; circle(430, 100, 18); ctx.fill();
+  // 食器棚
+  ctx.fillStyle = '#c98d55'; rr(40, 200, 290, 130, 10); ctx.fill();
+  ctx.fillStyle = '#8a5a30'; rr(40, 322, 290, 12, 4); ctx.fill();
+  ctx.fillStyle = '#f7e3c2'; rr(52, 212, 266, 100, 8); ctx.fill();
+  // 棚の中身
+  { const j = jigOff('hashi_src'); for (let i = 0; i < 3; i++) drawHashi(LAY1.hashi_src.x + j, LAY1.hashi_src.y - 8 + i * 8); }
+  { const j = jigOff('cups_src'); for (let i = 0; i < s.cupStack; i++) drawCup(LAY1.cups_src.x + j, LAY1.cups_src.y + 6 - i * 10); }
+  { const j = jigOff('oshibori_src'); for (let i = 0; i < s.oshiboriPile; i++) drawOshibori(LAY1.oshibori_src.x + j, LAY1.oshibori_src.y + 8 - i * 9); }
+  // シンク＋蛇口＋みずさし＋炊飯器
+  ctx.fillStyle = '#dfe8ee'; rr(690, 300, 260, 46, 8) ; ctx.fill(); // カウンター
+  ctx.fillStyle = '#b8c9d6'; rr(775, 316, 84, 24, 8); ctx.fill();  // シンクの凹み
+  ctx.strokeStyle = '#93a9ba'; ctx.lineWidth = 6; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(LAY1.faucet.x + jigOff('faucet'), 312); ctx.lineTo(LAY1.faucet.x + jigOff('faucet'), LAY1.faucet.y); ctx.lineTo(LAY1.faucet.x + 20, LAY1.faucet.y); ctx.stroke();
+  if (G.simT < G.faucetRun) { ctx.strokeStyle = 'rgba(120,190,230,.9)'; ctx.beginPath(); ctx.moveTo(LAY1.faucet.x + 20, LAY1.faucet.y + 4); ctx.lineTo(LAY1.faucet.x + 20, 318); ctx.stroke(); }
+  if (s.pitcherHome) drawPitcher(LAY1.pitcher.x + jigOff('pitcher'), LAY1.pitcher.y - 12, 1, s.pitcherFilled);
+  { const j = jigOff('suihanki'); ctx.fillStyle = '#f6f6f2'; rr(LAY1.suihanki.x - 26 + j, LAY1.suihanki.y - 20, 52, 34, 12); ctx.fill(); ctx.fillStyle = '#cfd6cf'; rr(LAY1.suihanki.x - 20 + j, LAY1.suihanki.y - 26, 40, 10, 5); ctx.fill(); }
+  // テーブル
+  ctx.fillStyle = '#e8a55f'; rr(320, 355, 330, 82, 16); ctx.fill();
+  ctx.fillStyle = '#c9853f'; rr(330, 430, 14, 60, 4); ctx.fill(); ctx.fillStyle = '#c9853f'; rr(626, 430, 14, 60, 4); ctx.fill();
+  // 席（ランチョンマット＝ゴール絵。うすい形が置き場所を語る——仕様§2-5）
+  for (const key of ['papa', 'mama', 'itsuki']) {
+    const L = LAY1['seat_' + key], seat = s.seats[key], j = jigOff('seat_' + key);
+    ctx.fillStyle = '#fdf6e4'; rr(L.x - 44 + j, L.y - 26, 88, 52, 10); ctx.fill();
+    ctx.strokeStyle = '#e3c9a0'; ctx.lineWidth = 2; rr(L.x - 44 + j, L.y - 26, 88, 52, 10); ctx.stroke();
+    // ゴースト（未配置のときだけ薄く）
+    if (!seat.hashi) ghost(() => drawHashi(L.x + 24 + j, L.y + 8)); else drawHashi(L.x + 24 + j, L.y + 8);
+    if (!seat.oshibori) ghost(() => drawOshibori(L.x - 24 + j, L.y + 10)); else drawOshibori(L.x - 24 + j, L.y + 10);
+    if (seat.cup === 'none') ghost(() => drawCup(L.x + j, L.y - 8));
+    else drawCup(L.x + j, L.y - 8, 1, seat.cup === 'full' ? 'full' : 'none');
+  }
+  // パパ・ママ
+  const pj = jigOff('papa'), mj = jigOff('mama');
+  const praying = G.mode === 'clear';
+  drawPerson(LAY1.papa.x + pj, s.papaSeated ? 352 : 330, { h: 96, skin: '#ffd9b0', shirt: '#7a9e6e', hair: '#3a2c1e', glasses: true, seated: s.papaSeated, pray: praying });
+  drawPerson(LAY1.mama.x + mj, 330, { h: 92, skin: '#ffd9b0', shirt: '#e88f9d', hair: '#5a3c22', pony: true, pray: praying });
+  drawPuddles(s);
+  drawItsuki();
+  drawBubbles();
+  drawFx();
+}
+
+/* --- シーン2: キッチン〜玄関 --- */
+function drawScene2() {
+  const s = S.s2, b = s.suitou;
+  const g1 = ctx.createLinearGradient(0, 0, 0, H);
+  g1.addColorStop(0, '#eef6e9'); g1.addColorStop(0.72, '#e2eedd'); g1.addColorStop(0.72, '#d9c49a'); g1.addColorStop(1, '#cdb488');
+  ctx.fillStyle = g1; ctx.fillRect(0, 0, W, H);
+  // 冷蔵庫
+  const fj = jigOff('freezer'), lj = jigOff('lower');
+  ctx.fillStyle = '#dfeef2'; rr(30, 180, 120, 230, 14); ctx.fill();
+  ctx.strokeStyle = '#a9c6cf'; ctx.lineWidth = 3; rr(30, 180, 120, 230, 14); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(30, 300); ctx.lineTo(150, 300); ctx.stroke();
+  if (s.freezerOpen) {
+    ctx.fillStyle = '#cfe6ec'; rr(36, 188, 108, 104, 8); ctx.fill();
+    if (!(s.icePlace === 'freezer' && !s.iceTaken)) { ctx.fillStyle = '#e9f6f9'; rr(46, 250, 60, 8, 3); ctx.fill(); } // 空の棚
+  } else { ctx.fillStyle = '#c3dde4'; rr(120 + fj, 230, 16, 34, 6); ctx.fill(); }
+  if (s.lowerOpen) {
+    ctx.fillStyle = '#d8ecd8'; rr(36, 308, 108, 94, 8); ctx.fill();
+    if (s.icePlace === 'lower' && !s.iceTaken) drawIce(LAY2.ice_l.x + jigOff('ice'), LAY2.ice_l.y);
+    else { ctx.fillStyle = '#9fd8a4'; circle(70, 360, 12); ctx.fill(); ctx.fillStyle = '#f0b53f'; circle(100, 365, 10); ctx.fill(); }
+  } else { ctx.fillStyle = '#c3dde4'; rr(120 + lj, 330, 16, 34, 6); ctx.fill(); }
+  // 氷（開いた冷凍室の中）
+  if (s.freezerOpen && s.icePlace === 'freezer' && !s.iceTaken) drawIce(LAY2.ice_f.x + jigOff('ice'), LAY2.ice_f.y);
+  // カウンター＋シンク＋蛇口
+  ctx.fillStyle = '#dfe8ee'; rr(230, 300, 420, 46, 8); ctx.fill();
+  ctx.fillStyle = '#b8c9d6'; rr(260, 316, 84, 24, 8); ctx.fill();
+  ctx.strokeStyle = '#93a9ba'; ctx.lineWidth = 6; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(LAY2.faucet.x - 18, 312); ctx.lineTo(LAY2.faucet.x - 18, LAY2.faucet.y); ctx.lineTo(LAY2.faucet.x + 4, LAY2.faucet.y); ctx.stroke();
+  if (G.simT < G.faucetRun) { ctx.strokeStyle = 'rgba(120,190,230,.9)'; ctx.beginPath(); ctx.moveTo(LAY2.faucet.x + 4, LAY2.faucet.y + 4); ctx.lineTo(LAY2.faucet.x + 4, 318); ctx.stroke(); }
+  // 水筒＋フタ（フタが置き場に無いときはゴーストが残る＝「戻す＝開ける」の可視ヒント。D13）
+  if (b.at === 'counter' && !b.inBag) drawSuitou(LAY2.suitou.x + jigOff('suitou'), LAY2.suitou.y - 6, 1, b);
+  if (s.lidAt === 'counter') drawLid(LAY2.lid.x + jigOff('lid'), LAY2.lid.y);
+  else if (!b.inBag) { const j = jigOff('lid'); ghost(() => drawLid(LAY2.lid.x + j, LAY2.lid.y)); }
+  // 弁当と箸セット（箸セットは弁当の陰に少し隠れる——タップ座標は分離済み）
+  if (!s.hashiset) drawHashiset(LAY2.hashiset.x + jigOff('hashiset'), LAY2.hashiset.y);
+  if (!s.bento) drawBento(LAY2.bento.x + jigOff('bento'), LAY2.bento.y - 6);
+  // カバン（中にうすい持ち物の形＝ゴール絵）
+  if (!s.bagWorn) {
+    const j = jigOff('bag');
+    ctx.fillStyle = '#e2543f'; rr(LAY2.bag.x - 44 + j, LAY2.bag.y - 34, 88, 64, 16); ctx.fill();
+    ctx.strokeStyle = '#b23d2c'; ctx.lineWidth = 3; rr(LAY2.bag.x - 44 + j, LAY2.bag.y - 34, 88, 64, 16); ctx.stroke();
+    ctx.fillStyle = '#f4e9d8'; rr(LAY2.bag.x - 34 + j, LAY2.bag.y - 26, 68, 48, 10); ctx.fill();
+    const slotY = LAY2.bag.y - 2;
+    if (b.inBag) drawSuitou(LAY2.bag.x - 20 + j, slotY - 4, 0.55, b); else ghost(() => drawSuitou(LAY2.bag.x - 20 + j, slotY - 4, 0.55, { water: false, ice: false, closed: true }));
+    if (s.bento) drawBento(LAY2.bag.x + 8 + j, slotY, 0.5); else ghost(() => drawBento(LAY2.bag.x + 8 + j, slotY, 0.5));
+    if (s.hashiset) drawHashiset(LAY2.bag.x + 22 + j, slotY - 14, 0.5); else ghost(() => drawHashiset(LAY2.bag.x + 22 + j, slotY - 14, 0.5));
+  }
+  // 鏡と日焼け止め棚
+  ctx.fillStyle = '#caa26a'; rr(660, 275, 110, 12, 4); ctx.fill(); // 棚板
+  if (!s.sunDone || (G.holding && G.holding.t === 'tube')) { if (!(G.holding && G.holding.t === 'tube')) drawTube(LAY2.tube.x + jigOff('tube'), LAY2.tube.y - 12); }
+  { const j = jigOff('mirror');
+    ctx.fillStyle = '#fdf6ff'; ctx.beginPath(); ctx.ellipse(LAY2.mirror.x + j, LAY2.mirror.y, 34, 44, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#caa26a'; ctx.lineWidth = 5; ctx.beginPath(); ctx.ellipse(LAY2.mirror.x + j, LAY2.mirror.y, 34, 44, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = '#e8e0f2'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(LAY2.mirror.x - 12 + j, LAY2.mirror.y - 24); ctx.lineTo(LAY2.mirror.x + 4 + j, LAY2.mirror.y - 4); ctx.stroke(); }
+  // 玄関ドア
+  { const j = jigOff('door');
+    ctx.fillStyle = '#b98352'; rr(860 + j, 170, 90, 250, 8); ctx.fill();
+    ctx.strokeStyle = '#8f5f33'; ctx.lineWidth = 4; rr(860 + j, 170, 90, 250, 8); ctx.stroke();
+    rr(874 + j, 190, 62, 100, 6); ctx.stroke();
+    ctx.fillStyle = '#f2cf7a'; circle(872 + j, LAY2.door.y + 25, 7); ctx.fill(); }
+  // ママ
+  drawPerson(LAY2.mama.x + jigOff('mama'), LAY2.mama.y + 60, { h: 92, skin: '#ffd9b0', shirt: '#e88f9d', hair: '#5a3c22', pony: true });
+  drawPuddles(s);
+  // 鏡ズーム（鏡が顔を大きく映す——タップ対象は鏡の中）
+  if (G.atMirror && !s.sunDone) {
+    ctx.fillStyle = 'rgba(80,60,90,.18)'; ctx.fillRect(640, 40, 320, 230);
+    ctx.fillStyle = '#fdf6ff'; ctx.beginPath(); ctx.ellipse(790, 160, 145, 115, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#caa26a'; ctx.lineWidth = 6; ctx.beginPath(); ctx.ellipse(790, 160, 145, 115, 0, 0, Math.PI * 2); ctx.stroke();
+    // 大きな顔
+    ctx.fillStyle = '#ffd9b0'; circle(790, 165, 88); ctx.fill();
+    ctx.fillStyle = '#4a3423'; ctx.beginPath(); ctx.arc(790, 150, 90, Math.PI * 1.06, Math.PI * 1.94); ctx.lineTo(866, 130); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#503a28'; circle(760, 170, 6); ctx.fill(); circle(820, 170, 6); ctx.fill();
+    ctx.strokeStyle = '#b35b4a'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(790, 195, 18, 0.2, Math.PI - 0.2); ctx.stroke();
+    // 塗りゾーン（ひたい・ほほ×2）: 未塗り＝素肌 / 塗り＝テカッ
+    const zones = ['fz0', 'fz1', 'fz2'];
+    zones.forEach((z, i) => {
+      const L = LAY2[z];
+      if (s.sun[i]) { ctx.fillStyle = 'rgba(255,245,200,.85)'; circle(L.x, L.y, 20); ctx.fill(); ctx.strokeStyle = '#ffdf7e'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(L.x - 8, L.y - 8); ctx.lineTo(L.x + 2, L.y + 2); ctx.stroke(); }
+      else { ctx.strokeStyle = 'rgba(200,160,120,.5)'; ctx.lineWidth = 2; ctx.setLineDash([5, 5]); circle(L.x, L.y, 20); ctx.stroke(); ctx.setLineDash([]); }
+    });
+  }
+  drawItsuki();
+  drawBubbles();
+  drawFx();
+}
+
+function draw() {
+  ctx.setTransform($('cv').width / W, 0, 0, $('cv').height / H, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  if (G.mode === 'play' || G.mode === 'clear') {
+    if (S.scene === 's1') drawScene1(); else if (S.scene === 's2') drawScene2();
+  } else {
+    ctx.fillStyle = '#fdf3e3'; ctx.fillRect(0, 0, W, H);
+  }
+}
+
+/* ================= レイアウト（バー分離・Retina） ================= */
 function fitCanvas() {
   const r = $('wrap').getBoundingClientRect();
   const s = Math.min(r.width / W, r.height / H);
   const cv = $('cv');
   cv.style.width = (W * s) + 'px'; cv.style.height = (H * s) + 'px';
   cv.style.left = ((r.width - W * s) / 2) + 'px'; cv.style.top = ((r.height - H * s) / 2) + 'px';
-  // Retina対応：内部解像度は「表示サイズ×devicePixelRatio」で確保する（固定 960x540 のままだと
-  // 高密度ディスプレイで引き伸ばされてぼやける）。描画は論理座標のまま（draw 冒頭の setTransform）
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const bw = Math.max(1, Math.round(W * s * dpr)), bh = Math.max(1, Math.round(H * s * dpr));
   if (cv.width !== bw || cv.height !== bh) { cv.width = bw; cv.height = bh; }
 }
 addEventListener('resize', fitCanvas);
-// バーの高さが変わる等、window resize を伴わない遊び場のサイズ変化にも追従する
 if (window.ResizeObserver) new ResizeObserver(fitCanvas).observe($('wrap'));
 
-/* ---------- 描画＋メインループ ---------- */
-const ctx = $('cv').getContext('2d');
-function draw(now) {
-  const t = now / 1000;
-  ctx.setTransform($('cv').width / W, 0, 0, $('cv').height / H, 0, 0); // 論理座標→実ピクセル
-  ctx.clearRect(0, 0, W, H);
-  const grad = ctx.createLinearGradient(0, 0, 0, H);
-  grad.addColorStop(0, '#141d2e'); grad.addColorStop(1, '#0a0f1a');
-  ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
-
-  tapTargets().forEach((tg, i) => {
-    const lit = S.lit[i];
-    ctx.beginPath(); ctx.arc(tg.x, tg.y, 34, 0, Math.PI * 2);
-    if (lit) {
-      const pulse = 0.75 + 0.25 * Math.sin(t * 3 + i);
-      ctx.fillStyle = `rgba(255,215,106,${pulse})`;
-      ctx.shadowColor = '#ffd76a'; ctx.shadowBlur = 24;
-      ctx.fill();
-      ctx.shadowBlur = 0;
-    } else {
-      ctx.strokeStyle = '#33507a'; ctx.lineWidth = 3; ctx.stroke();
-    }
-  });
-
-  if (S.done) {
-    ctx.fillStyle = 'rgba(220,230,245,.9)'; ctx.font = '28px sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText('すべて灯った', W / 2, 470);
+/* ================= メインループ（rAF に最終防衛線——原則45） ================= */
+let lastT = 0, acc = 0;
+function frame(now) {
+  try {
+    const dtReal = Math.min(0.25, (now - lastT) / 1000 || 0);
+    lastT = now;
+    acc += dtReal * TS;
+    let guard = 0;
+    while (acc >= DT && guard++ < 2400) { sim(DT); acc -= DT; }
+    draw();
+  } catch (e) {
+    console.error('frame error:', e); // ハーネスは console.error を fail として収集する
   }
-  requestAnimationFrame(draw);
+  requestAnimationFrame(frame);
 }
 fitCanvas();
-requestAnimationFrame(draw);
+enterTitle();
+requestAnimationFrame(frame);
 </script>
 </body>
 </html>
