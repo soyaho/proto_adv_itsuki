@@ -64,6 +64,18 @@ module.exports = {
       d.assert(s.s2.puddles.length === 0, `シーン2で水たまりが拭けない`);
     });
 
+    await d.step('先にフタを閉めると水が入らない→フタを置き場に戻して開ける（D13）', async () => {
+      await d.tapTarget('lid');                    // 水を入れる前に閉めてしまう
+      let s = await d.readState();
+      d.assert(s.s2.suitou.closed === true, `フタが閉まらない`);
+      await d.tapTarget('faucet');                 // 閉じたままでは入らない
+      s = await d.readState();
+      d.assert(s.s2.suitou.water === false, `閉じた水筒に水が入ってしまった`);
+      await d.tapTarget('lid');                    // フタを置き場に戻す＝開ける（D8の文法）
+      s = await d.readState();
+      d.assert(s.s2.suitou.closed === false, `フタを開け直せない`);
+    });
+
     await d.step('水を入れ直し→フタ→閉めた水筒は運んでもこぼれない→カバンへ（D6）', async () => {
       await d.tapTarget('faucet');
       await d.tapTarget('lid');                    // フタを閉める（持ったまま）

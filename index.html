@@ -165,10 +165,9 @@ const LAY2 = {
   faucet:  { x: 300, y: 265, rad: 32 },
   sink:    { x: 300, y: 345, rad: 32 },
   suitou:  { x: 380, y: 305, rad: 32 },
-  lid_on:  { x: 380, y: 253, rad: 30 },  // フタが閉まっているときの開ける対象
-  lid:     { x: 435, y: 275, rad: 28 },
+  lid:     { x: 435, y: 275, rad: 28 },  // フタの置き場。閉めた後はゴーストが残り「戻す＝開ける」（D8・D13）
   bento:   { x: 560, y: 305, rad: 32 },
-  hashiset:{ x: 610, y: 340, rad: 30 },
+  hashiset:{ x: 615, y: 345, rad: 30 },
   bag:     { x: 660, y: 445, rad: 40 },
   tube:    { x: 715, y: 290, rad: 30 },
   mirror:  { x: 790, y: 215, rad: 36 },
@@ -203,8 +202,7 @@ function tapTargets() {
     }
     add('faucet', LAY2.faucet); add('sink', LAY2.sink);
     if (!s.suitou.inBag) add('suitou', LAY2.suitou); // 持っている間は「戻す先」として残す（D8）
-    if (s.lidAt === 'counter' || s.lidAt === 'hand') add('lid', LAY2.lid);
-    if (s.lidAt === 'bottle' && s.suitou.at === 'counter' && !s.suitou.inBag) add('lid_on', LAY2.lid_on);
+    if (!s.suitou.inBag) add('lid', LAY2.lid);       // フタが手・ボトル上にあっても置き場は残る（戻す＝開ける。D13）
     if (!s.bento || (G.holding && G.holding.t === 'bento')) add('bento', LAY2.bento);
     if (!s.hashiset || (G.holding && G.holding.t === 'hashiset')) add('hashiset', LAY2.hashiset);
     if (!s.bagWorn) add('bag', LAY2.bag);
@@ -311,7 +309,15 @@ function holdingOpenWater() {
 }
 function addPuddle(x, y) {
   const s = S.scene === 's1' ? S.s1 : S.s2;
-  s.puddles.push({ id: 'puddle' + (s.puddleSeq++), x: Math.max(50, Math.min(W - 50, x)), y: Math.max(FLOOR_TOP, Math.min(FLOOR_BOT, y)) + 12 });
+  const py = Math.max(FLOOR_TOP, Math.min(FLOOR_BOT, y)) + 12;
+  // 既存ターゲットの近くに湧かせない（判定の横取り防止。監査所見→クリアランス70px）
+  let px = Math.max(50, Math.min(W - 50, x));
+  const ts = tapTargets();
+  for (const off of [0, -70, 70, -140, 140, -210, 210]) {
+    const cx = Math.max(50, Math.min(W - 50, px + off));
+    if (ts.every(t => Math.hypot(t.x - cx, t.y - py) >= 70)) { px = cx; break; }
+  }
+  s.puddles.push({ id: 'puddle' + (s.puddleSeq++), x: px, y: py });
 }
 
 /* ================= 入力（canvas は実タップのみ） ================= */
@@ -369,6 +375,7 @@ function interact1(id) {
     }
     case id === 'cups_src': {
       if (!h && s.cupStack > 0) { G.holding = { t: 'cups', n: s.cupStack, filled: false }; s.cupStack = 0; G.carry = 0; SFX.pick(); }
+      else if (h && h.t === 'cups' && h.filled) { fx('tapu', LAY1.cups_src.x, LAY1.cups_src.y - 20, 0.7); SFX.tapu(); umm(); } // 水入りは棚に戻せない（世界のルールの一貫性）
       else if (h && h.t === 'cups') { s.cupStack = h.n; G.holding = null; SFX.place(); }
       else jiggle(id);
       break;
@@ -476,7 +483,7 @@ function interact2(id) {
       if (b.at === 'counter') {
         if (h && h.t === 'ice') {
           if (b.water) { fx('tapu', LAY2.suitou.x, LAY2.suitou.y - 24, 0.8); SFX.tapu(); umm(); } // 水が先だと入らない
-          else if (b.closed) { umm('lid_on'); }
+          else if (b.closed) { umm('lid'); }
           else { b.ice = true; s.iceTaken = true; G.holding = null; SFX.clink(); fx('sparkle', LAY2.suitou.x, LAY2.suitou.y - 20, 0.5); }
         } else if (h && h.t === 'lid') {
           if (!b.closed) { b.closed = true; s.lidAt = 'bottle'; G.holding = null; SFX.click(); }
@@ -487,14 +494,10 @@ function interact2(id) {
       else jiggle(id);
       break;
     }
-    case id === 'lid_on': { // 閉まっているフタを開ける（やり直し経路）
-      if (!h && b.closed) { b.closed = false; s.lidAt = 'counter'; SFX.click(); jiggle('lid'); }
-      else jiggle(id);
-      break;
-    }
     case id === 'lid': {
       if (h && h.t === 'suitou') {
         if (!b.closed && s.lidAt === 'counter') { b.closed = true; s.lidAt = 'bottle'; SFX.click(); fx('sparkle', LAY2.lid.x, LAY2.lid.y - 10, 0.4); }
+        else if (b.closed && s.lidAt === 'bottle') { b.closed = false; s.lidAt = 'counter'; SFX.click(); jiggle(id); } // フタを置き場に戻す＝開ける（D8・D13）
         else jiggle(id);
       } else if (!h && s.lidAt === 'counter') { G.holding = { t: 'lid' }; s.lidAt = 'hand'; SFX.pick(); }
       else if (h && h.t === 'lid') { G.holding = null; s.lidAt = 'counter'; SFX.place(); }
@@ -504,7 +507,7 @@ function interact2(id) {
     case id === 'faucet': {
       G.faucetRun = G.simT + 0.8; fx('waterjet', LAY2.faucet.x, LAY2.faucet.y + 18, 0.8); SFX.pour();
       if (h && h.t === 'suitou') {
-        if (b.closed) { umm('lid_on'); }                                   // フタが邪魔→開ければいい
+        if (b.closed) { umm('lid'); }                                      // フタが邪魔→置き場（ゴースト）がヒント
         else if (!b.water) { b.water = true; G.carry = 0; SFX.fill(); fx('sparkle', G.it.x, G.it.y - 90, 0.6); }
         else { fx('tapu', G.it.x, G.it.y - 90, 0.7); SFX.tapu(); }
       }
@@ -532,7 +535,7 @@ function interact2(id) {
         if (b.ice && b.water && b.closed) { b.inBag = true; b.at = 'bag'; G.holding = null; SFX.place(); fx('sparkle', LAY2.bag.x, LAY2.bag.y - 20, 0.6); }
         else { // まだ準備できていない→足りないものが世界側でヒントを出す（原則3・49の部分反応）
           umm();
-          if (!b.closed) jiggle(s.lidAt === 'bottle' ? 'lid_on' : 'lid');
+          if (!b.closed) jiggle('lid');
           if (!b.water) jiggle('faucet');
           if (!b.ice) jiggle(s.icePlace === 'lower' ? 'lower' : 'freezer');
         }
@@ -953,9 +956,10 @@ function drawScene2() {
   ctx.strokeStyle = '#93a9ba'; ctx.lineWidth = 6; ctx.lineCap = 'round';
   ctx.beginPath(); ctx.moveTo(LAY2.faucet.x - 18, 312); ctx.lineTo(LAY2.faucet.x - 18, LAY2.faucet.y); ctx.lineTo(LAY2.faucet.x + 4, LAY2.faucet.y); ctx.stroke();
   if (G.simT < G.faucetRun) { ctx.strokeStyle = 'rgba(120,190,230,.9)'; ctx.beginPath(); ctx.moveTo(LAY2.faucet.x + 4, LAY2.faucet.y + 4); ctx.lineTo(LAY2.faucet.x + 4, 318); ctx.stroke(); }
-  // 水筒＋フタ
-  if (b.at === 'counter' && !b.inBag) drawSuitou(LAY2.suitou.x + jigOff('suitou') + jigOff('lid_on'), LAY2.suitou.y - 6, 1, b);
+  // 水筒＋フタ（フタが置き場に無いときはゴーストが残る＝「戻す＝開ける」の可視ヒント。D13）
+  if (b.at === 'counter' && !b.inBag) drawSuitou(LAY2.suitou.x + jigOff('suitou'), LAY2.suitou.y - 6, 1, b);
   if (s.lidAt === 'counter') drawLid(LAY2.lid.x + jigOff('lid'), LAY2.lid.y);
+  else if (!b.inBag) { const j = jigOff('lid'); ghost(() => drawLid(LAY2.lid.x + j, LAY2.lid.y)); }
   // 弁当と箸セット（箸セットは弁当の陰に少し隠れる——タップ座標は分離済み）
   if (!s.hashiset) drawHashiset(LAY2.hashiset.x + jigOff('hashiset'), LAY2.hashiset.y);
   if (!s.bento) drawBento(LAY2.bento.x + jigOff('bento'), LAY2.bento.y - 6);

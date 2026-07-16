@@ -63,6 +63,7 @@ module.exports = {
       s = await d.readState();
       d.assert(s.holding === null && s.s1.seats.itsuki.cup === 'empty', `こぼれた後のコップが空で置かれていない: ${JSON.stringify(s.s1.seats.itsuki)}`);
       d.assert(s.s1.puddles.length === 1, `水たまりができていない: ${JSON.stringify(s.s1.puddles)}`);
+      await d.checkTargets();                     // 水たまりが既存ターゲットと重ならないこと（監査所見の恒久検出）
     });
 
     await d.step('水たまりを拭く（罰ではなく遊び）', async () => {

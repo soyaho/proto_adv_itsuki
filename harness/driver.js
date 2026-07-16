@@ -99,6 +99,12 @@ class GameDriver extends BaseDriver {
     await this.checkPointsUncovered(objs, ['.hbtn']);
     // 当たり判定の最小 60×60px 相当（仕様§3.1）
     for (const o of objs) this.assert(o.rad >= 28, `当たり判定が小さすぎる: ${o.id} rad=${o.rad}`);
+    // 判定円の重なり下限（監査所見: lid_on↔suitou の重なりクラスの恒久検出。
+    // 基盤の separation は同座標(d<12)しか fail にしないため、ゲーム側で「半径和-8px」を下限にする）
+    for (let i = 0; i < objs.length; i++) for (let j = i + 1; j < objs.length; j++) {
+      const a = objs[i], b = objs[j], dd = Math.hypot(a.x - b.x, a.y - b.y);
+      this.assert(dd >= a.rad + b.rad - 8, `判定円が重なりすぎ: ${a.id}↔${b.id} d=${dd.toFixed(0)} < ${a.rad + b.rad - 8}`);
+    }
   }
   /** インタラクティブDOMの相互遮蔽・画面外＋バーと遊び場の分離 */
   async checkUiOcclusion() {
