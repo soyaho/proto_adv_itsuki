@@ -1,0 +1,10 @@
+{
+  "name": "game-harness",
+  "private": true,
+  "description": "このゲームの実入力テストハーネス（基盤は real-input-harness）",
+  "scripts": { "test": "node run.js" },
+  "dependencies": {
+    "playwright": "^1.49.0",
+    "real-input-harness": "file:../framework"
+  }
+}

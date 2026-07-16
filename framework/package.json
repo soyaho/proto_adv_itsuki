@@ -1,0 +1,8 @@
+{
+  "name": "real-input-harness",
+  "version": "0.1.0",
+  "private": true,
+  "description": "実入力主義のブラウザゲーム用テストハーネス基盤（Playwright）。ゲーム非依存のランナーとドライバ基盤を提供する",
+  "main": "index.js",
+  "dependencies": { "playwright": "^1.49.0" }
+}

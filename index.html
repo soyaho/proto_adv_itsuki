@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover">
+<title>スターター — 三つの灯</title>
+<!--
+  配線確認用スターター。
+  ゲームを作るときはこのファイルを丸ごと置き換える。ただし次の3点は、新しいゲームでも
+  そのまま踏襲すること（harness/driver.js・harness/scenarios/ の見本と対応している）:
+
+  - tapTargets(): タップ判定を持つ「もの」を列挙して返すグローバル関数。
+    ハーネスはこれを読み取り専用で読んで、座標変換・重なりチェック・実タップに使う
+  - S（進行状態・セーブ対象・JSON化可能）/ G（揮発状態・モードのみ）というグローバル変数の分離
+  - 進行フラグは操作の瞬間に確定・即セーブする（タイマーや演出コールバックの中で確定させない）
+
+  この3点さえ守れば、ジャンルは何でもよい。
+-->
+<style>
+  html,body{margin:0;height:100%;background:#0e1420;color:#dce6f5;font-family:system-ui,-apple-system,sans-serif;overflow:hidden;-webkit-user-select:none;user-select:none}
+  #app{display:flex;flex-direction:column;height:100%}
+  /* 上部バー。canvas とは構造的に分離（重ねない） */
+  #hud{display:flex;align-items:center;gap:10px;padding:6px 10px;background:#141d2e;border-bottom:1px solid #26344d}
+  #title-label{flex:1;font-size:13px;opacity:.9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #prog{font-size:13px;opacity:.8}
+  .hbtn{background:#1d2a42;color:#dce6f5;border:1px solid #33507a;border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer}
+  /* 遊び場。canvas は #wrap 内にレターボックス配置 */
+  #wrap{position:relative;flex:1;min-height:0}
+  #cv{position:absolute;background:#0a0f1a;touch-action:none}
+  /* 下部ドック。canvas とは構造的に分離。高さ固定で内容変化によるレイアウトのガタつきを断つ */
+  #dock{display:flex;justify-content:center;align-items:center;gap:12px;padding:8px;background:#141d2e;border-top:1px solid #26344d;min-height:56px;box-sizing:border-box}
+  #title{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#0e1420;z-index:10;text-align:center;padding:0 24px}
+  #title h1{font-weight:400;letter-spacing:.2em;font-size:22px;margin:0}
+  #title p{opacity:.6;font-size:12px;margin:0;max-width:420px}
+  #title button{min-width:200px;padding:12px;border-radius:12px;border:1px solid #33507a;background:#1d2a42;color:#dce6f5;font-size:15px;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hud">
+    <span id="title-label">スターター — 三つの灯</span>
+    <span id="prog">灯 0/3</span>
+  </div>
+  <div id="wrap">
+    <canvas id="cv" width="960" height="540"></canvas>
+  </div>
+  <div id="dock">
+    <button class="hbtn" id="btnReset">はじめから</button>
+  </div>
+</div>
+<div id="title">
+  <h1>スターター — 三つの灯</h1>
+  <p>3つの灯をすべて点けるだけの最小ゲーム。canvas 上の円をタップすると灯る。</p>
+  <button class="hbtn" id="btnStart">はじめる</button>
+  <button class="hbtn" id="btnCont">つづきから</button>
+</div>
+<script>
+'use strict';
+/* ---------- 定数 ---------- */
+const W = 960, H = 540;                          // 論理座標系（ハーネスの logicalWidth/Height と一致させる）
+const SAVE_KEY = 'html-game-template:starter';
+
+/* ---------- 状態 ----------
+   S = 進行状態（セーブ対象・JSON化可能）。新フラグは必ずここに足し、
+       旧セーブに無くても falsy で安全なように設計する
+   G = 揮発状態（モードのみ。セーブしない） */
+const DEF = () => ({ lit: [false, false, false], done: false });
+let S = DEF();
+let G = { mode: 'title' };
+
+/* ---------- タップ対象（読み取り専用でハーネスに公開。座標は重ねない） ---------- */
+function tapTargets() {
+  return [
+    { id: 'a', x: 240, y: 300, rad: 46 },
+    { id: 'b', x: 480, y: 220, rad: 46 },
+    { id: 'c', x: 720, y: 340, rad: 46 },
+  ];
+}
+
+/* ---------- セーブ ---------- */
+function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) {} }
+function loadSave() {
+  try { const j = localStorage.getItem(SAVE_KEY); return j ? reconcileSave(Object.assign(DEF(), JSON.parse(j))) : null; }
+  catch (e) { return null; }
+}
+/* 逆算修復の見本：done は lit の純粋な導出値なので、旧セーブに done が無い／壊れていても
+   lit から再計算して安全に保てる。実ゲーム化するときは「導出フラグ（再計算してよい）」と
+   「操作で確定するフラグ（reconcileSave は補完のみ・取り消し禁止）」を区別すること */
+function reconcileSave(s) {
+  if (!Array.isArray(s.lit) || s.lit.length !== 3) s.lit = [false, false, false];
+  s.lit = s.lit.map(Boolean);
+  s.done = s.lit.every(Boolean);
+  return s;
+}
+
+/* ---------- HUD ---------- */
+const $ = id => document.getElementById(id);
+function updateProg() { $('prog').textContent = `灯 ${S.lit.filter(Boolean).length}/3`; }
+
+/* ---------- 入力（canvas は実タップのみ） ---------- */
+function toLogical(ev) {
+  const r = $('cv').getBoundingClientRect();
+  return { x: (ev.clientX - r.left) / r.width * W, y: (ev.clientY - r.top) / r.height * H };
+}
+$('cv').addEventListener('pointerdown', ev => {
+  if (G.mode !== 'play') return;
+  const p = toLogical(ev);
+  // 最近傍ヒット（同座標は常に曖昧なので、そもそも座標を重ねない設計にしている）
+  let hit = null, best = 1e9;
+  for (const t of tapTargets()) {
+    const d = Math.hypot(t.x - p.x, t.y - p.y);
+    if (d < t.rad && d < best) { best = d; hit = t; }
+  }
+  if (!hit) return;
+  const i = tapTargets().findIndex(t => t.id === hit.id);
+  if (S.lit[i]) return; // 点灯済みの再タップは無反応（状態を変えない）
+  // 進行フラグの確定とセーブはタップの瞬間に同期的に行う（演出やタイマーの中で確定させない）
+  S.lit[i] = true;
+  if (S.lit.every(Boolean)) S.done = true;
+  save();
+  updateProg();
+});
+
+/* ---------- タイトル／セーブ操作 ---------- */
+function enterPlay() { $('title').style.display = 'none'; G.mode = 'play'; updateProg(); }
+/* DOM ボタンは click で拾う（タッチ・マウス・キーボードの標準挙動を活かす。
+   実タップ主義が要るのは遊び場＝canvas 側だけ） */
+$('btnStart').addEventListener('click', () => { S = DEF(); save(); enterPlay(); });
+$('btnCont').addEventListener('click', () => { const s = loadSave(); if (s) { S = s; enterPlay(); } });
+if (!loadSave()) $('btnCont').style.display = 'none';
+
+$('btnReset').addEventListener('click', () => { S = DEF(); save(); updateProg(); });
+
+/* ---------- デバッグ（?debug。ハーネスでは使わない） ---------- */
+if (location.search.includes('debug')) {
+  const box = document.createElement('div');
+  box.id = 'dbg';
+  box.innerHTML = '<button class="hbtn">全部灯す</button>';
+  $('dock').appendChild(box);
+  box.querySelector('button').addEventListener('click', () => {
+    S.lit = [true, true, true]; S.done = true; save(); updateProg();
+  });
+}
+
+/* ---------- レイアウト（fitCanvas がバー分を差し引く＝UIは遊び場に重ねない） ---------- */
+function fitCanvas() {
+  const r = $('wrap').getBoundingClientRect();
+  const s = Math.min(r.width / W, r.height / H);
+  const cv = $('cv');
+  cv.style.width = (W * s) + 'px'; cv.style.height = (H * s) + 'px';
+  cv.style.left = ((r.width - W * s) / 2) + 'px'; cv.style.top = ((r.height - H * s) / 2) + 'px';
+  // Retina対応：内部解像度は「表示サイズ×devicePixelRatio」で確保する（固定 960x540 のままだと
+  // 高密度ディスプレイで引き伸ばされてぼやける）。描画は論理座標のまま（draw 冒頭の setTransform）
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const bw = Math.max(1, Math.round(W * s * dpr)), bh = Math.max(1, Math.round(H * s * dpr));
+  if (cv.width !== bw || cv.height !== bh) { cv.width = bw; cv.height = bh; }
+}
+addEventListener('resize', fitCanvas);
+// バーの高さが変わる等、window resize を伴わない遊び場のサイズ変化にも追従する
+if (window.ResizeObserver) new ResizeObserver(fitCanvas).observe($('wrap'));
+
+/* ---------- 描画＋メインループ ---------- */
+const ctx = $('cv').getContext('2d');
+function draw(now) {
+  const t = now / 1000;
+  ctx.setTransform($('cv').width / W, 0, 0, $('cv').height / H, 0, 0); // 論理座標→実ピクセル
+  ctx.clearRect(0, 0, W, H);
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#141d2e'); grad.addColorStop(1, '#0a0f1a');
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+
+  tapTargets().forEach((tg, i) => {
+    const lit = S.lit[i];
+    ctx.beginPath(); ctx.arc(tg.x, tg.y, 34, 0, Math.PI * 2);
+    if (lit) {
+      const pulse = 0.75 + 0.25 * Math.sin(t * 3 + i);
+      ctx.fillStyle = `rgba(255,215,106,${pulse})`;
+      ctx.shadowColor = '#ffd76a'; ctx.shadowBlur = 24;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    } else {
+      ctx.strokeStyle = '#33507a'; ctx.lineWidth = 3; ctx.stroke();
+    }
+  });
+
+  if (S.done) {
+    ctx.fillStyle = 'rgba(220,230,245,.9)'; ctx.font = '28px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('すべて灯った', W / 2, 470);
+  }
+  requestAnimationFrame(draw);
+}
+fitCanvas();
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
